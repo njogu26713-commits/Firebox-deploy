@@ -596,7 +596,9 @@ async function loadLogs() {
     for (const entry of logs) {
       const props = entry.properties || {};
       const startTs = props.startTime ? new Date(props.startTime).toLocaleString() : '';
-      const status  = (props.status || 'unknown').toLowerCase();
+      const status  = (typeof props.status === 'object'
+        ? props.status?.localizedValue || props.status?.value || 'unknown'
+        : props.status || 'unknown').toLowerCase();
       const author  = props.author || '';
 
       if (entry._type === 'activity') {
