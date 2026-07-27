@@ -1,0 +1,263 @@
+/* ── Azure Integration Styles ─────────────────────────────────────────── */
+
+/* Azure brand blue */
+:root {
+  --azure: #0078D4;
+  --azure-dim: #004E8C;
+  --azure-glow: rgba(0, 120, 212, 0.20);
+}
+
+/* ── Setup / not-configured banner ───────────────────────────────────── */
+
+.azure-setup-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 64px);
+  padding: 40px 20px;
+}
+
+.azure-setup-inner {
+  text-align: center;
+  max-width: 440px;
+}
+
+.azure-setup-icon {
+  font-size: 52px;
+  margin-bottom: 18px;
+  filter: grayscale(0.3);
+}
+
+.azure-setup-inner h2 {
+  font-size: 22px;
+  margin-bottom: 10px;
+}
+
+.azure-setup-inner p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+
+/* ── Azure stat tile accent ───────────────────────────────────────────── */
+
+.stat-tile.azure-accent {
+  border-color: var(--azure-dim);
+  background: linear-gradient(135deg, var(--surface), rgba(0,120,212,0.06));
+}
+
+.stat-tile .value.azure { color: var(--azure); }
+
+/* ── Azure app card ───────────────────────────────────────────────────── */
+
+.azure-app-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  cursor: pointer;
+  transition: border-color .15s, transform .12s;
+}
+.azure-app-card:hover { border-color: var(--azure-dim); transform: translateY(-1px); }
+
+.azure-app-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+
+.azure-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+  background: var(--azure-glow); border: 1px solid var(--azure-dim); color: #60ABEC;
+}
+
+/* ── Live apps table ─────────────────────────────────────────────────── */
+
+.azure-apps-table { width: 100%; border-collapse: collapse; }
+.azure-apps-table th { 
+  text-align: left; color: var(--muted); font-weight: 600; 
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; 
+  padding: 10px 12px; border-bottom: 1px solid var(--border); 
+}
+.azure-apps-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); }
+.azure-apps-table tr:last-child td { border-bottom: none; }
+.azure-apps-table tr:hover td { background: rgba(255,255,255,.025); }
+
+.app-name-cell { font-weight: 600; }
+.app-url-cell { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.app-url-cell a { color: var(--azure); }
+.app-actions { display: flex; gap: 6px; flex-wrap: nowrap; }
+
+/* ── Metric cards ────────────────────────────────────────────────────── */
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.metric-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.metric-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 8px;
+}
+
+.metric-value {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.metric-chart {
+  height: 50px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.metric-bar {
+  flex: 1;
+  background: var(--azure);
+  border-radius: 2px 2px 0 0;
+  min-height: 2px;
+  opacity: 0.7;
+  transition: opacity .15s;
+}
+.metric-bar:hover { opacity: 1; }
+
+/* ── Cost panel ──────────────────────────────────────────────────────── */
+
+.cost-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.cost-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+
+.cost-card .cost-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.cost-card .cost-value { font-size: 28px; font-weight: 700; font-family: var(--font-display); margin-top: 6px; }
+.cost-card .cost-currency { font-size: 14px; color: var(--muted); margin-top: 2px; }
+
+.cost-breakdown { }
+.cost-breakdown-title { font-weight: 600; margin-bottom: 12px; }
+.cost-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.cost-row:last-child { border-bottom: none; }
+.cost-row-name { flex: 1; font-size: 13px; }
+.cost-row-bar-wrap { width: 120px; height: 6px; background: var(--surface-3); border-radius: 4px; overflow: hidden; }
+.cost-row-bar-fill { height: 100%; background: var(--azure); border-radius: 4px; }
+.cost-row-amount { font-weight: 600; font-size: 13px; min-width: 60px; text-align: right; }
+
+/* ── Domains ─────────────────────────────────────────────────────────── */
+
+.domain-add-row { display: flex; gap: 8px; margin-top: 14px; }
+.domain-add-row input { flex: 1; }
+
+/* ── Status badge overrides for Azure ───────────────────────────────── */
+
+.token-badge.azure-connected {
+  background: var(--azure-glow);
+  border-color: var(--azure-dim);
+  color: #60ABEC;
+}
+
+.token-badge.failed {
+  background: rgba(255,68,68,.1);
+  border-color: rgba(255,68,68,.3);
+  color: #FF8080;
+}
+
+/* ── Help list in settings ───────────────────────────────────────────── */
+
+.azure-help-list {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+  padding-left: 20px;
+  margin: 0;
+}
+.azure-help-list li { margin-bottom: 6px; }
+.azure-help-list strong { color: var(--text); }
+.azure-help-list code { 
+  font-family: var(--font-mono); font-size: 12px;
+  background: var(--surface-3); padding: 1px 5px; border-radius: 4px;
+}
+.azure-help-list a { color: var(--azure); text-decoration: underline; }
+
+/* ── Creds result messages ───────────────────────────────────────────── */
+
+.creds-success {
+  background: rgba(45,212,191,.08);
+  border: 1px solid var(--teal-dim);
+  color: var(--teal);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.creds-error {
+  background: rgba(255,68,68,.08);
+  border: 1px solid rgba(255,68,68,.3);
+  color: #FF8080;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+/* ── App detail in modal ─────────────────────────────────────────────── */
+
+.app-detail-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.app-detail-row:last-child { border-bottom: none; }
+.app-detail-label { color: var(--muted); font-weight: 600; min-width: 110px; }
+.app-detail-value { color: var(--text); word-break: break-all; }
+
+.app-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+
+/* ── Loading spinner ─────────────────────────────────────────────────── */
+
+.azure-loading {
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px; padding: 32px; color: var(--muted); font-size: 13.5px;
+}
+
+.spinner {
+  width: 18px; height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--azure);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Responsive tweaks ───────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .metrics-grid { grid-template-columns: 1fr; }
+  .cost-summary  { grid-template-columns: repeat(2, 1fr); }
+  .app-actions   { flex-wrap: wrap; }
+}

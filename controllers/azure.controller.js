@@ -1,0 +1,307 @@
+/**
+ * azure.controller.js
+ * Request handlers for all Azure API routes.
+ */
+
+const azure   = require('../services/azure.service');
+const AzureApp = require('../models/AzureApp');
+
+// ── Credentials & Status ───────────────────────────────────────────────────
+
+async function getStatus(req, res) {
+  const provider = await azure.getProvider();
+  if (!provider || !provider.clientId) {
+    return res.json({ status: 'unconfigured', configured: false });
+  }
+  return res.json({
+    status:       provider.status,
+    statusError:  provider.statusError,
+    lastVerified: provider.lastVerified,
+    configured:   true,
+  });
+}
+
+async function saveCredentials(req, res) {
+  const { clientId, clientSecret, tenantId, subscriptionId } = req.body;
+  if (!clientId || !clientSecret || !tenantId || !subscriptionId) {
+    return res.status(400).json({ error: 'All four Azure credentials are required' });
+  }
+  await azure.saveCredentials({ clientId, clientSecret, tenantId, subscriptionId });
+  // Attempt immediate verification
+  const check = await azure.verifyConnection();
+  if (!check.ok) {
+    return res.status(400).json({ error: `Credentials saved but connection failed: ${check.error}` });
+  }
+  res.json({ success: true, message: 'Azure credentials saved and verified' });
+}
+
+async function verifyConnection(req, res) {
+  const check = await azure.verifyConnection();
+  res.json(check);
+}
+
+async function deleteCredentials(req, res) {
+  const provider = await azure.getProvider();
+  if (provider) {
+    provider.clientId       = '';
+    provider.clientSecret   = '';
+    provider.tenantId       = '';
+    provider.subscriptionId = '';
+    provider.cachedToken    = '';
+    provider.tokenExpiresAt = null;
+    provider.status         = 'unconfigured';
+    provider.statusError    = '';
+    await provider.save();
+  }
+  res.json({ success: true });
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+
+async function getDashboard(req, res) {
+  const summary = await azure.getDashboardSummary();
+  res.json(summary);
+}
+
+// ── Resource Groups ────────────────────────────────────────────────────────
+
+async function listResourceGroups(req, res) {
+  const groups = await azure.listResourceGroups();
+  res.json({ resourceGroups: groups });
+}
+
+async function createResourceGroup(req, res) {
+  const { name, location = 'eastus', tags } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  const rg = await azure.createResourceGroup(name, location, tags || {});
+  res.json({ resourceGroup: rg });
+}
+
+async function deleteResourceGroup(req, res) {
+  const { name } = req.params;
+  await azure.deleteResourceGroup(name);
+  res.json({ success: true });
+}
+
+// ── App Service Plans ──────────────────────────────────────────────────────
+
+async function listPlans(req, res) {
+  const plans = await azure.listAppServicePlans();
+  res.json({ plans });
+}
+
+async function createPlan(req, res) {
+  const { resourceGroup, name, location = 'eastus', sku = 'B1', isLinux = true } = req.body;
+  if (!resourceGroup || !name) return res.status(400).json({ error: 'resourceGroup and name are required' });
+  const plan = await azure.createAppServicePlan(resourceGroup, name, location, sku, isLinux);
+  res.json({ plan });
+}
+
+// ── Web Apps ───────────────────────────────────────────────────────────────
+
+async function listApps(req, res) {
+  const apps = await azure.listApps();
+  res.json({ apps });
+}
+
+async function getApp(req, res) {
+  const { resourceGroup, name } = req.params;
+  const app = await azure.getApp(resourceGroup, name);
+  res.json({ app });
+}
+
+async function createApp(req, res) {
+  const { resourceGroup, name, location = 'eastus', planId, runtimeStack = 'NODE|18-lts' } = req.body;
+  if (!resourceGroup || !name || !planId) {
+    return res.status(400).json({ error: 'resourceGroup, name, and planId are required' });
+  }
+  const app = await azure.createApp(resourceGroup, name, location, planId, runtimeStack);
+  res.json({ app });
+}
+
+async function deleteApp(req, res) {
+  const { resourceGroup, name } = req.params;
+  await azure.deleteApp(resourceGroup, name);
+  res.json({ success: true });
+}
+
+async function startApp(req, res) {
+  const { resourceGroup, name } = req.params;
+  await azure.startApp(resourceGroup, name);
+  res.json({ success: true });
+}
+
+async function stopApp(req, res) {
+  const { resourceGroup, name } = req.params;
+  await azure.stopApp(resourceGroup, name);
+  res.json({ success: true });
+}
+
+async function restartApp(req, res) {
+  const { resourceGroup, name } = req.params;
+  await azure.restartApp(resourceGroup, name);
+  res.json({ success: true });
+}
+
+// ── Environment Variables ──────────────────────────────────────────────────
+
+async function getEnvVars(req, res) {
+  const { resourceGroup, name } = req.params;
+  const settings = await azure.getAppSettings(resourceGroup, name);
+  res.json({ settings });
+}
+
+async function updateEnvVars(req, res) {
+  const { resourceGroup, name } = req.params;
+  const { settings } = req.body;
+  if (!settings || typeof settings !== 'object') {
+    return res.status(400).json({ error: 'settings must be a key-value object' });
+  }
+  const result = await azure.updateAppSettings(resourceGroup, name, settings);
+  res.json({ result });
+}
+
+// ── Deployment ─────────────────────────────────────────────────────────────
+
+async function deployFromGitHub(req, res) {
+  const { resourceGroup, name } = req.params;
+  const { repoUrl, branch = 'main' } = req.body;
+  if (!repoUrl) return res.status(400).json({ error: 'repoUrl is required' });
+
+  await azure.configureGithubDeploy(resourceGroup, name, repoUrl, branch);
+  res.json({ success: true, message: 'GitHub source control configured. Azure will begin deploying.' });
+}
+
+async function syncDeployment(req, res) {
+  const { resourceGroup, name } = req.params;
+  await azure.syncDeploy(resourceGroup, name);
+  res.json({ success: true, message: 'Sync triggered' });
+}
+
+async function listDeployments(req, res) {
+  const { resourceGroup, name } = req.params;
+  const deployments = await azure.listDeployments(resourceGroup, name);
+  res.json({ deployments });
+}
+
+// ── Monitoring ─────────────────────────────────────────────────────────────
+
+async function getMetrics(req, res) {
+  const { resourceGroup, name } = req.params;
+  const { range = '24h' } = req.query;
+  const metrics = await azure.getMetrics(resourceGroup, name, range);
+  res.json({ metrics });
+}
+
+// ── Logs ───────────────────────────────────────────────────────────────────
+
+async function getLogs(req, res) {
+  const { resourceGroup, name } = req.params;
+  const logs = await azure.getRecentLogs(resourceGroup, name);
+  res.json({ logs });
+}
+
+// ── Domains ────────────────────────────────────────────────────────────────
+
+async function listDomains(req, res) {
+  const { resourceGroup, name } = req.params;
+  const domains = await azure.listHostNames(resourceGroup, name);
+  res.json({ domains });
+}
+
+async function addDomain(req, res) {
+  const { resourceGroup, name } = req.params;
+  const { hostname } = req.body;
+  if (!hostname) return res.status(400).json({ error: 'hostname is required' });
+  const result = await azure.addCustomDomain(resourceGroup, name, hostname);
+  res.json({ result });
+}
+
+async function removeDomain(req, res) {
+  const { resourceGroup, name, hostname } = req.params;
+  await azure.removeCustomDomain(resourceGroup, name, hostname);
+  res.json({ success: true });
+}
+
+// ── Scaling ────────────────────────────────────────────────────────────────
+
+async function scaleApp(req, res) {
+  const { resourceGroup, planName } = req.params;
+  const { instanceCount } = req.body;
+  if (!instanceCount || instanceCount < 1) {
+    return res.status(400).json({ error: 'instanceCount must be >= 1' });
+  }
+  const result = await azure.scaleApp(resourceGroup, planName, instanceCount);
+  res.json({ result });
+}
+
+// ── Cost ───────────────────────────────────────────────────────────────────
+
+async function getCost(req, res) {
+  const cost = await azure.getCostSummary();
+  res.json({ cost });
+}
+
+// ── FireboxDeploy-tracked Azure Apps ──────────────────────────────────────
+
+async function listTrackedApps(req, res) {
+  const userId = req.session.userId || req.userId;
+  const apps = await AzureApp.find({ owner: userId }).sort({ createdAt: -1 });
+  res.json({ apps });
+}
+
+async function createTrackedApp(req, res) {
+  const userId = req.session.userId || req.userId;
+  const {
+    name, resourceGroup, region, planName, planSku,
+    runtime, runtimeVersion, repoUrl, branch, rootDir,
+    buildCommand, startCommand, port, envVars,
+  } = req.body;
+
+  if (!name || !resourceGroup) {
+    return res.status(400).json({ error: 'name and resourceGroup are required' });
+  }
+
+  const app = await AzureApp.create({
+    name, resourceGroup,
+    region:         region        || 'East US',
+    planName:       planName      || '',
+    planSku:        planSku       || 'F1',
+    runtime:        runtime       || 'nodejs',
+    runtimeVersion: runtimeVersion || '',
+    repoUrl:        repoUrl       || '',
+    branch:         branch        || 'main',
+    rootDir:        rootDir       || '.',
+    buildCommand:   buildCommand  || '',
+    startCommand:   startCommand  || '',
+    port:           port          || 8080,
+    envVars:        Array.isArray(envVars) ? envVars : [],
+    status:         'idle',
+    owner:          userId,
+  });
+
+  res.status(201).json({ app });
+}
+
+async function deleteTrackedApp(req, res) {
+  const app = await AzureApp.findById(req.params.id);
+  if (!app) return res.status(404).json({ error: 'Not found' });
+  await app.deleteOne();
+  res.json({ success: true });
+}
+
+module.exports = {
+  getStatus, saveCredentials, verifyConnection, deleteCredentials,
+  getDashboard,
+  listResourceGroups, createResourceGroup, deleteResourceGroup,
+  listPlans, createPlan,
+  listApps, getApp, createApp, deleteApp, startApp, stopApp, restartApp,
+  getEnvVars, updateEnvVars,
+  deployFromGitHub, syncDeployment, listDeployments,
+  getMetrics,
+  getLogs,
+  listDomains, addDomain, removeDomain,
+  scaleApp,
+  getCost,
+  listTrackedApps, createTrackedApp, deleteTrackedApp,
+};
