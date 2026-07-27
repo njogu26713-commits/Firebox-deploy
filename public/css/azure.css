@@ -254,6 +254,21 @@
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Setup notice (shown inside settings panel when not configured) ──────── */
+
+.azure-setup-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--azure-glow);
+  border: 1px solid var(--azure-dim);
+  color: #60ABEC;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  margin-bottom: 20px;
+}
+
 /* ── Environment Variables ───────────────────────────────────────────────── */
 
 .env-vars-header {

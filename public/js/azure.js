@@ -26,12 +26,20 @@ async function init() {
   updateStatusBar(status);
   updateSettingsBadge(status);
 
-  // Always show main content so the Settings tab is reachable
   document.getElementById('mainContent').style.display = 'block';
 
   if (!azureConfigured) {
-    document.getElementById('notConfiguredBanner').style.display = 'flex';
+    // Hide the full-page overlay; show a compact notice inside the settings panel instead
+    document.getElementById('notConfiguredBanner').style.display = 'none';
     showTab('settings');
+    // Inject a small notice at the top of the settings panel
+    const panel = document.getElementById('panel-settings');
+    if (panel && !panel.querySelector('.azure-setup-notice')) {
+      const notice = document.createElement('div');
+      notice.className = 'azure-setup-notice';
+      notice.innerHTML = '<span>☁</span> Enter your Azure Service Principal credentials below to start deploying apps.';
+      panel.insertBefore(notice, panel.firstChild);
+    }
     return;
   }
 
