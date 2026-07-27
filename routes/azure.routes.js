@@ -49,10 +49,18 @@ router.post('/apps/:resourceGroup/:name/restart',ctrl.restartApp);
 router.get('/apps/:resourceGroup/:name/env',     ctrl.getEnvVars);
 router.put('/apps/:resourceGroup/:name/env',     ctrl.updateEnvVars);
 
-// ── Deployment
+// ── Deployment (JSON — kept for API/webhook callers)
 router.post('/apps/:resourceGroup/:name/deploy', ctrl.deployFromGitHub);
+
+// ── Deployment streaming via SSE (used by the dashboard UI)
+router.post('/apps/:resourceGroup/:name/deploy-stream', ctrl.streamDeploy);
+
 router.post('/apps/:resourceGroup/:name/sync',   ctrl.syncDeployment);
 router.get('/apps/:resourceGroup/:name/deployments', ctrl.listDeployments);
+
+// ── FireboxDeploy deployment history (persisted in local DB)
+router.get('/apps/:resourceGroup/:name/deploy-history',  ctrl.listAzureDeployments);
+router.get('/deploy-log/:deploymentId',                  ctrl.getAzureDeploymentLog);
 
 // ── Monitoring
 router.get('/apps/:resourceGroup/:name/metrics', ctrl.getMetrics);

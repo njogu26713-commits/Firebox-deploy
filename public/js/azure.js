@@ -7,7 +7,11 @@ let azureConfigured = false;
 let allLiveApps = [];
 let allResourceGroups = [];
 let currentDomainsApp = { rg: '', name: '' };
-let _regionsCache = null; // [{ name, displayName }] — client-side cache to avoid redundant API calls
+let _regionsCache = null;
+
+// Current deploy log data (for the log viewer modal)
+let _currentLogData = { logs: [], deployment: null };
+let _currentLogFilter = 'all';
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -30,10 +34,8 @@ async function init() {
   document.getElementById('mainContent').style.display = 'block';
 
   if (!azureConfigured) {
-    // Hide the full-page overlay; show a compact notice inside the settings panel instead
     document.getElementById('notConfiguredBanner').style.display = 'none';
     showTab('settings');
-    // Inject a small notice at the top of the settings panel
     const panel = document.getElementById('panel-settings');
     if (panel && !panel.querySelector('.azure-setup-notice')) {
       const notice = document.createElement('div');
@@ -77,24 +79,14 @@ function updateStatusBar(status) {
 
 // ── Regions ────────────────────────────────────────────────────────────────
 
-/**
- * Fetch available regions for the connected subscription from the Azure Management
- * API and populate every region/location <select> in the UI.
- *
- * Uses a client-side cache so rapid modal opens don't re-fetch; pass force=true
- * (or click "Refresh Regions") to bypass both the client cache and the 30-min
- * server-side cache.
- */
 async function loadRegions(force = false) {
   if (!azureConfigured) return;
 
-  // Fast path: client already has data and caller didn't ask for a refresh
   if (!force && _regionsCache) {
     populateRegionSelects(_regionsCache);
     return;
   }
 
-  // Show loading state in all region/location dropdowns
   ['dm-region', 'rg-location'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = '<option value="">⏳ Loading regions…</option>';
@@ -136,8 +128,6 @@ function populateRegionSelects(locations) {
     });
     return;
   }
-  // value = Azure location name (e.g. "eastus")
-  // text  = friendly display name (e.g. "East US")
   const options = locations
     .map((loc) => `<option value="${escapeHtml(loc.name)}">${escapeHtml(loc.displayName)}</option>`)
     .join('');
@@ -164,10 +154,9 @@ function updateSettingsBadge(status) {
 // ── Tabs ───────────────────────────────────────────────────────────────────
 
 function showTab(name) {
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab[data-tab]').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${name}`));
 
-  // Lazy-load on first open
   if (name === 'apps')             loadLiveApps();
   if (name === 'resource-groups')  loadResourceGroups();
   if (name === 'cost')             loadCost();
@@ -177,6 +166,17 @@ function showTab(name) {
 document.getElementById('azureTabs').addEventListener('click', (e) => {
   const tab = e.target.closest('[data-tab]');
   if (tab) showTab(tab.dataset.tab);
+});
+
+// Log sub-tabs
+document.getElementById('logSubTabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('[data-subtab]');
+  if (!tab) return;
+  const name = tab.dataset.subtab;
+  document.querySelectorAll('#logSubTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.subtab === name));
+  document.getElementById('subpanel-activity').style.display      = name === 'activity' ? '' : 'none';
+  document.getElementById('subpanel-deploy-history').style.display = name === 'deploy-history' ? '' : 'none';
+  if (name === 'deploy-history') loadDeployHistory();
 });
 
 // ── Overview ───────────────────────────────────────────────────────────────
@@ -198,14 +198,12 @@ async function loadOverview() {
     console.warn('Dashboard summary error:', err.message);
   }
 
-  // cost tile
   apiFetch('/api/azure/cost').then((r) => {
     const rows = r.cost?.properties?.rows || [];
     const total = rows.reduce((sum, row) => sum + (parseFloat(row[0]) || 0), 0);
     document.getElementById('monthlyCost').textContent = `$${total.toFixed(2)}`;
   }).catch(() => { document.getElementById('monthlyCost').textContent = '—'; });
 
-  // tracked apps
   loadTrackedApps();
 }
 
@@ -228,8 +226,6 @@ async function loadTrackedApps() {
 
 function appCard(app) {
   const runtimeLabel = { nodejs: 'Node.js', python: 'Python', php: 'PHP', java: 'Java', go: 'Go', dotnet: '.NET' };
-  const statusColor  = { running: 'var(--teal)', stopped: 'var(--muted)', failed: 'var(--danger)', building: 'var(--amber)', deploying: 'var(--amber)', idle: 'var(--muted-2)' };
-
   return `
   <div class="card azure-app-card" onclick="openAppDetail('${escapeHtml(app.resourceGroup)}','${escapeHtml(app.name)}','${escapeHtml(app._id)}')">
     <div class="azure-app-card-head">
@@ -246,6 +242,9 @@ function appCard(app) {
       <span>Region <b>${escapeHtml(app.region || '—')}</b></span>
       <span>Tier <b>${escapeHtml(app.planSku || '—')}</b></span>
       <span class="azure-badge">☁ Azure</span>
+    </div>
+    <div class="project-meta" style="margin-top:6px;">
+      <button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="event.stopPropagation();openDeployHistoryForApp('${escapeHtml(app.resourceGroup)}','${escapeHtml(app.name)}')">📋 Deploy Logs</button>
     </div>
   </div>`;
 }
@@ -298,6 +297,7 @@ function liveAppRow(app) {
         <button class="btn btn-ghost btn-sm" title="Start"  onclick="appAction('start','${escapeHtml(rg)}','${escapeHtml(app.name)}')">▶</button>
         <button class="btn btn-ghost btn-sm" title="Stop"   onclick="appAction('stop','${escapeHtml(rg)}','${escapeHtml(app.name)}')">■</button>
         <button class="btn btn-ghost btn-sm" title="Restart" onclick="appAction('restart','${escapeHtml(rg)}','${escapeHtml(app.name)}')">↻</button>
+        <button class="btn btn-ghost btn-sm" title="Deploy Logs" onclick="openDeployHistoryForApp('${escapeHtml(rg)}','${escapeHtml(app.name)}')">📋</button>
         <button class="btn btn-danger btn-sm" title="Delete" onclick="confirmDeleteApp('${escapeHtml(rg)}','${escapeHtml(app.name)}')">🗑</button>
       </div>
     </td>
@@ -434,7 +434,6 @@ let currentEnvApp = { rg: '', name: '' };
 function setEnvVarsApp(rg, name) {
   const sel = document.getElementById('envVarsApp');
   if (!sel) return;
-  // Try to find and select the matching option
   for (const opt of sel.options) {
     try {
       const val = JSON.parse(opt.value);
@@ -477,9 +476,7 @@ async function loadEnvVars() {
 function renderEnvVars(settings, rg, name) {
   const panel = document.getElementById('envVarsPanel');
   const entries = Object.entries(settings || {});
-
   const rows = entries.map(([k, v]) => envVarRow(k, v)).join('');
-
   panel.innerHTML = `
   <div class="card" style="padding:20px;">
     <div class="env-vars-header">
@@ -542,7 +539,6 @@ async function saveEnvVars(rg, name) {
 let _scaleContext = { rg: '', planName: '' };
 
 async function openScaleModal(rg, appName) {
-  // Look up the plan name from allLiveApps
   const app = allLiveApps.find((a) => a.name === appName);
   const planId = app?.properties?.serverFarmId || '';
   const planName = planId.split('/').pop() || `${appName}-plan`;
@@ -550,7 +546,6 @@ async function openScaleModal(rg, appName) {
 
   document.getElementById('scalePlanName').textContent = planName;
 
-  // Try to fetch current instance count
   try {
     const { instanceCount } = await apiFetch(`/api/azure/plans/${encodeURIComponent(rg)}/${encodeURIComponent(planName)}/instance-count`);
     document.getElementById('scaleSlider').value = instanceCount;
@@ -579,7 +574,7 @@ document.getElementById('confirmScaleBtn').addEventListener('click', async () =>
   }
 });
 
-// ── Logs ───────────────────────────────────────────────────────────────────
+// ── Activity Logs ───────────────────────────────────────────────────────────
 
 async function loadLogs() {
   const sel = document.getElementById('logsApp');
@@ -605,7 +600,6 @@ async function loadLogs() {
       const author  = props.author || '';
 
       if (entry._type === 'activity') {
-        // Azure Activity Log event (start/stop/restart/config/deploy operations)
         const level   = (props.level || 'Informational').toLowerCase();
         const cls     = level === 'error' || level === 'critical' ? 'error'
                       : level === 'warning' ? 'warn'
@@ -623,7 +617,6 @@ async function loadLogs() {
           `</div>`
         );
       } else {
-        // Kudu deployment pipeline entry
         const endTs   = props.endTime ? new Date(props.endTime).toLocaleString() : '';
         const message = props.message || props.deploymentLogs || `Deployment ${entry.name || ''}`;
         const cls     = status === 'success' ? 'success' : (status === 'failed') ? 'error' : 'info';
@@ -655,6 +648,192 @@ async function loadLogs() {
   } catch (err) {
     term.innerHTML = `<div class="line error">${escapeHtml(err.message)}</div>`;
   }
+}
+
+// ── Deploy History ─────────────────────────────────────────────────────────
+
+let _historyContext = { rg: '', name: '' };
+
+async function loadDeployHistory() {
+  const sel  = document.getElementById('historyApp');
+  const val  = sel?.value;
+  const panel = document.getElementById('deployHistoryPanel');
+
+  let rg, name;
+  if (val) {
+    try { const p = JSON.parse(val); rg = p.rg; name = p.name; } catch { /* skip */ }
+  } else if (_historyContext.rg) {
+    rg = _historyContext.rg; name = _historyContext.name;
+  }
+
+  if (!rg || !name) {
+    panel.innerHTML = '<div class="empty"><p>Select an app to view its deployment history.</p></div>';
+    return;
+  }
+  _historyContext = { rg, name };
+
+  panel.innerHTML = '<div class="azure-loading"><div class="spinner"></div>Loading deployment history…</div>';
+
+  try {
+    const { deployments } = await apiFetch(`/api/azure/apps/${encodeURIComponent(rg)}/${encodeURIComponent(name)}/deploy-history`);
+    if (!deployments || !deployments.length) {
+      panel.innerHTML = '<div class="empty"><p>No deployment records found for this app.</p><p style="font-size:12px;color:var(--muted-2);">FireboxDeploy records deployments triggered from the dashboard. Deployments made outside FireboxDeploy will not appear here.</p></div>';
+      return;
+    }
+
+    panel.innerHTML = `
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table>
+          <thead><tr><th>Started</th><th>Branch</th><th>Status</th><th>Failed Step</th><th>Duration</th><th></th></tr></thead>
+          <tbody>
+            ${deployments.map(deployHistoryRow).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (err) {
+    panel.innerHTML = `<div class="empty"><p style="color:var(--danger);">${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function deployHistoryRow(dep) {
+  const started  = dep.startedAt ? new Date(dep.startedAt).toLocaleString() : '—';
+  const duration = dep.startedAt && dep.completedAt
+    ? `${Math.round((new Date(dep.completedAt) - new Date(dep.startedAt)) / 1000)}s`
+    : '—';
+  const statusColor = { success: 'var(--teal)', failed: 'var(--danger)', running: 'var(--amber)' }[dep.status] || 'var(--muted)';
+  const statusIcon  = { success: '✓', failed: '✕', running: '⏳' }[dep.status] || '?';
+  const failedStep  = dep.failedStep ? escapeHtml(dep.failedStep) : '—';
+
+  return `
+  <tr>
+    <td style="font-size:12px;white-space:nowrap;">${escapeHtml(started)}</td>
+    <td><span class="badge">${escapeHtml(dep.branch || 'main')}</span></td>
+    <td><span style="color:${statusColor};font-weight:600;">${statusIcon} ${escapeHtml(dep.status)}</span></td>
+    <td style="font-size:12px;color:${dep.failedStep ? 'var(--danger)' : 'var(--muted-2)'};">${failedStep}</td>
+    <td style="font-size:12px;color:var(--muted);">${escapeHtml(duration)}</td>
+    <td>
+      <button class="btn btn-ghost btn-sm" onclick="openDeployLog('${escapeHtml(dep._id)}')">View Logs</button>
+    </td>
+  </tr>`;
+}
+
+// Open deploy history for a specific app (from app card / table row)
+function openDeployHistoryForApp(rg, name) {
+  _historyContext = { rg, name };
+  showTab('logs');
+  // Switch to deploy-history sub-tab
+  setTimeout(() => {
+    document.querySelectorAll('#logSubTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.subtab === 'deploy-history'));
+    document.getElementById('subpanel-activity').style.display = 'none';
+    document.getElementById('subpanel-deploy-history').style.display = '';
+    // Pre-select the app in the selector
+    const sel = document.getElementById('historyApp');
+    if (sel) {
+      for (const opt of sel.options) {
+        try {
+          const val = JSON.parse(opt.value);
+          if (val.rg === rg && val.name === name) { sel.value = opt.value; break; }
+        } catch { /* skip */ }
+      }
+    }
+    loadDeployHistory();
+  }, 50);
+}
+
+// ── Deploy Log Viewer ──────────────────────────────────────────────────────
+
+async function openDeployLog(deploymentId) {
+  _currentLogData = { logs: [], deployment: null };
+  _currentLogFilter = 'all';
+
+  document.getElementById('deployLogTitle').textContent = 'Loading…';
+  document.getElementById('deployLogMeta').textContent  = '';
+  document.getElementById('deployLogFailedStep').style.display = 'none';
+  document.getElementById('deployLogTerminal').innerHTML = '<span style="color:var(--muted-2);">Loading…</span>';
+  document.getElementById('deployLogModal').classList.add('open');
+
+  try {
+    const { deployment } = await apiFetch(`/api/azure/deploy-log/${encodeURIComponent(deploymentId)}`);
+    _currentLogData = { logs: deployment.logs || [], deployment };
+
+    const started  = deployment.startedAt ? new Date(deployment.startedAt).toLocaleString() : '—';
+    const duration = deployment.startedAt && deployment.completedAt
+      ? `${Math.round((new Date(deployment.completedAt) - new Date(deployment.startedAt)) / 1000)}s`
+      : '—';
+
+    const statusColor = { success: 'var(--teal)', failed: 'var(--danger)', running: 'var(--amber)' }[deployment.status] || 'var(--muted)';
+    document.getElementById('deployLogTitle').textContent = `${deployment.appName} — Deployment Log`;
+    document.getElementById('deployLogMeta').innerHTML =
+      `<span style="color:${statusColor};font-weight:600;">${deployment.status}</span> · ` +
+      `${escapeHtml(deployment.branch || 'main')} · ${escapeHtml(started)} · ${escapeHtml(duration)}`;
+
+    if (deployment.failedStep) {
+      const failEl = document.getElementById('deployLogFailedStep');
+      failEl.innerHTML = `✕ Failed at step: <strong>${escapeHtml(deployment.failedStep)}</strong>` +
+        (deployment.errorMessage ? `<br><span style="font-size:12px;opacity:.8;">${escapeHtml(deployment.errorMessage.slice(0, 300))}${deployment.errorMessage.length > 300 ? '…' : ''}</span>` : '');
+      failEl.style.display = 'block';
+    }
+
+    renderDeployLogTerminal();
+  } catch (err) {
+    document.getElementById('deployLogTerminal').innerHTML = `<div class="line error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function setLogFilter(filter, btn) {
+  _currentLogFilter = filter;
+  document.querySelectorAll('.log-filter-btn').forEach((b) => b.classList.toggle('active', b.dataset.filter === filter));
+  renderDeployLogTerminal();
+}
+
+function renderDeployLogTerminal() {
+  const term = document.getElementById('deployLogTerminal');
+  const { logs, deployment } = _currentLogData;
+
+  if (!logs || !logs.length) {
+    term.innerHTML = '<span style="color:var(--muted-2);">No log entries recorded for this deployment.</span>';
+    return;
+  }
+
+  const filtered = _currentLogFilter === 'all'
+    ? logs
+    : _currentLogFilter === 'error'
+      ? logs.filter((e) => e.level === 'error' || e.stream === 'error')
+      : logs.filter((e) => e.stream === _currentLogFilter);
+
+  const lines = filtered.map((entry) => {
+    const ts    = entry.ts ? new Date(entry.ts).toLocaleTimeString() : '';
+    const cls   = entry.stream === 'stderr' || entry.level === 'error' ? 'error'
+                : entry.stream === 'stdout' ? 'info'
+                : entry.level === 'warn'    ? 'warn'
+                : entry.level === 'success' ? 'success'
+                : 'info';
+    const streamLabel = entry.stream && entry.stream !== 'info'
+      ? `<span style="opacity:.5;font-size:.8em;margin-right:4px;">[${entry.stream}]</span>`
+      : '';
+    const stepLabel = entry.step
+      ? `<span style="opacity:.4;font-size:.8em;margin-right:4px;">[${entry.step}]</span>`
+      : '';
+    const msg = escapeHtml(entry.message || '').replace(/\n/g, '<br>');
+    return `<div class="line ${cls}"><span class="ts">${escapeHtml(ts)}</span>${stepLabel}${streamLabel}${msg}</div>`;
+  });
+
+  if (!lines.length) {
+    term.innerHTML = `<span style="color:var(--muted-2);">No entries matching filter "${_currentLogFilter}".</span>`;
+    return;
+  }
+
+  // Append Kudu log if available and showing all/error
+  if (deployment?.kuduLog && (_currentLogFilter === 'all' || _currentLogFilter === 'error' || _currentLogFilter === 'stderr')) {
+    lines.push('<div class="line" style="border-top:1px solid rgba(255,255,255,.1);margin:8px 0;padding:0;"></div>');
+    lines.push('<div class="line warn">— Kudu Deployment Log —</div>');
+    escapeHtml(deployment.kuduLog).split('\n').forEach((l) => {
+      lines.push(`<div class="line error" style="padding-left:16px;">${l}</div>`);
+    });
+  }
+
+  term.innerHTML = lines.join('');
+  term.scrollTop = 0;
 }
 
 // ── Domains ────────────────────────────────────────────────────────────────
@@ -833,24 +1012,112 @@ document.getElementById('deleteCredsBtn').addEventListener('click', async () => 
   }
 });
 
-// "Refresh Regions" button in Settings tab — useful after changing subscription
 document.getElementById('refreshRegionsBtnSettings').addEventListener('click', () => {
-  _regionsCache = null; // bust client cache
-  loadRegions(true);    // bust server cache + repopulate all region dropdowns
+  _regionsCache = null;
+  loadRegions(true);
 });
+
+// ── SSE streaming helpers ──────────────────────────────────────────────────
+
+/**
+ * Parse Server-Sent Events from a raw string chunk.
+ * Calls onEvent(type, parsedData) for each complete event.
+ */
+function parseSSEChunk(raw, onEvent) {
+  const blocks = raw.split(/\n\n+/);
+  for (const block of blocks) {
+    if (!block.trim()) continue;
+    let event = 'message';
+    let data  = '';
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:'))  data  = line.slice(5).trim();
+    }
+    if (!data) continue;
+    try {
+      onEvent(event, JSON.parse(data));
+    } catch { /* malformed JSON — skip */ }
+  }
+}
 
 // ── Deploy Modal ───────────────────────────────────────────────────────────
 
+// Pipeline step order for the progress bar
+const PIPELINE_STEPS = [
+  'Clone Repository',
+  'Install Dependencies',
+  'Build',
+  'Create Package',
+  'Get Publishing Profile',
+  'Configure Azure Settings',
+  'Upload (Zip Deploy)',
+  'Deployment Status',
+  'Verify Deployed Files',
+  'Application Startup',
+];
+
+let _dmCurrentDeploymentId = null;   // azureDeploymentId from server, set on success/error
+
+function resetDeployModal() {
+  document.getElementById('dm-form').style.display = '';
+  document.getElementById('dm-log-screen').style.display = 'none';
+  document.getElementById('dm-terminal').innerHTML = '';
+  document.getElementById('dm-result').style.display = 'none';
+  document.getElementById('dm-result').innerHTML = '';
+  document.getElementById('dm-post-actions').style.display = 'none';
+  document.getElementById('dm-step-progress').innerHTML = '';
+  document.getElementById('dm-terminal-spinner').style.display = '';
+  document.getElementById('deployModalTitle').textContent = 'Deploy to Azure App Service';
+  _dmCurrentDeploymentId = null;
+
+  const btn = document.getElementById('confirmDeployBtn');
+  btn.disabled    = false;
+  btn.textContent = '🚀 Deploy';
+}
+
+function renderStepProgress(currentStep, failedStep) {
+  const container = document.getElementById('dm-step-progress');
+  container.innerHTML = PIPELINE_STEPS.map((step) => {
+    let cls = 'step-idle';
+    let icon = '○';
+    if (step === failedStep) { cls = 'step-failed'; icon = '✕'; }
+    else if (step === currentStep) { cls = 'step-active'; icon = '●'; }
+    else if (currentStep && PIPELINE_STEPS.indexOf(step) < PIPELINE_STEPS.indexOf(currentStep)) {
+      cls = 'step-done'; icon = '✓';
+    }
+    return `<div class="deploy-step ${cls}">${icon} <span>${escapeHtml(step)}</span></div>`;
+  }).join('');
+}
+
+function appendTerminalLine(entry) {
+  const term = document.getElementById('dm-terminal');
+  const cls  = entry.stream === 'stderr' || entry.level === 'error' ? 'error'
+             : entry.stream === 'stdout' ? 'info'
+             : entry.level === 'warn'    ? 'warn'
+             : 'info';
+  const streamLabel = entry.stream && entry.stream !== 'info'
+    ? `<span style="opacity:.4;font-size:.8em;margin-right:4px;">[${entry.stream}]</span>`
+    : '';
+  const msg = escapeHtml(entry.message || '').replace(/\n/g, '<br>');
+  const div = document.createElement('div');
+  div.className = `line ${cls}`;
+  div.innerHTML = `${streamLabel}${msg}`;
+  term.appendChild(div);
+  term.scrollTop = term.scrollHeight;
+}
+
 function openDeployModal() {
+  resetDeployModal();
   populateRgDropdown('dm-rg');
-  loadRegions(); // uses client cache if available; fetches from server only when needed
+  loadRegions();
   document.getElementById('deployModal').classList.add('open');
 }
 
 document.getElementById('deployBtn').addEventListener('click', openDeployModal);
-document.getElementById('deployFirstBtn') && document.getElementById('deployFirstBtn').addEventListener('click', openDeployModal);
+const deployFirstBtn = document.getElementById('deployFirstBtn');
+if (deployFirstBtn) deployFirstBtn.addEventListener('click', openDeployModal);
 
-// Auto-fill deploy modal from fireboxdeploy.toml when repo URL is entered
+// Auto-fill deploy modal from fireboxdeploy.toml
 document.getElementById('dm-repo').addEventListener('blur', async () => {
   const repoUrl = document.getElementById('dm-repo').value.trim();
   const branch  = document.getElementById('dm-branch').value.trim() || 'main';
@@ -875,7 +1142,7 @@ document.getElementById('dm-repo').addEventListener('blur', async () => {
       if ([...rtSel.options].some((o) => o.value === config.runtimeStack)) rtSel.value = config.runtimeStack;
     }
     showToast('Auto-filled from fireboxdeploy.toml', 'success');
-  } catch { /* file not found or not a GitHub repo — ignore */ }
+  } catch { /* ignore */ }
 });
 
 document.getElementById('confirmDeployBtn').addEventListener('click', async () => {
@@ -892,45 +1159,31 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
   if (!name || !rg) { showToast('App name and resource group are required', 'error'); return; }
 
   const btn = document.getElementById('confirmDeployBtn');
-  btn.disabled = true;
-  btn.textContent = 'Deploying…';
+  btn.disabled    = true;
+  btn.textContent = 'Setting up…';
 
   try {
-    // 1. Create App Service Plan
+    // Step 1: Create App Service Plan
+    btn.textContent = 'Creating plan…';
     const planName = `${name}-plan`;
     await apiFetch('/api/azure/plans', {
       method: 'POST',
       body: JSON.stringify({ resourceGroup: rg, name: planName, location: region, sku }),
     });
 
-    // 2. Determine plan ID
-    const creds = await apiFetch('/api/azure/status');
-    // Get plans to find the ID
+    // Step 2: Find plan ID
     const { plans } = await apiFetch('/api/azure/plans');
-    const plan = plans.find((p) => p.name === planName);
+    const plan   = plans.find((p) => p.name === planName);
     const planId = plan?.id || '';
 
-    // 3. Create Web App
+    // Step 3: Create Web App
+    btn.textContent = 'Creating web app…';
     await apiFetch('/api/azure/apps', {
       method: 'POST',
       body: JSON.stringify({ resourceGroup: rg, name, location: region, planId, runtimeStack: runtime }),
     });
 
-    // 4. Configure GitHub source
-    if (repoUrl) {
-      await apiFetch(`/api/azure/apps/${encodeURIComponent(rg)}/${encodeURIComponent(name)}/deploy`, {
-        method: 'POST',
-        body: JSON.stringify({
-          repoUrl,
-          branch,
-          buildCommand: build,
-          startCommand: start,
-        }),
-      });
-    }
-
-    // 5. Track locally
-    const [rgStr] = [rg];
+    // Step 4: Track locally (pre-flight, before deploy)
     await apiFetch('/api/azure/tracked-apps', {
       method: 'POST',
       body: JSON.stringify({
@@ -941,29 +1194,146 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
         buildCommand: build, startCommand: start,
         azureUrl: `${name}.azurewebsites.net`,
       }),
-    });
+    }).catch(() => {}); // non-fatal
 
-    showToast('App deployed to Azure!', 'success');
-    closeModal('deployModal');
-    loadTrackedApps();
-    loadLiveApps();
+    if (!repoUrl) {
+      showToast('App created in Azure (no repo — skipping deploy)', 'success');
+      closeModal('deployModal');
+      resetDeployModal();
+      loadTrackedApps();
+      loadLiveApps();
+      return;
+    }
+
+    // Step 5: Switch modal to log screen and stream the deployment
+    document.getElementById('dm-form').style.display = 'none';
+    document.getElementById('dm-log-screen').style.display = '';
+    document.getElementById('deployModalTitle').textContent = `Deploying ${name}…`;
+    renderStepProgress('', '');
+
+    let lastStep = '';
+
+    const response = await fetch(
+      `/api/azure/apps/${encodeURIComponent(rg)}/${encodeURIComponent(name)}/deploy-stream`,
+      {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ repoUrl, branch, buildCommand: build, startCommand: start }),
+        credentials: 'same-origin',
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Deploy stream failed: HTTP ${response.status}`);
+    }
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer    = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete SSE blocks (end with \n\n)
+      const splitAt = buffer.lastIndexOf('\n\n');
+      if (splitAt === -1) continue;
+      const ready = buffer.slice(0, splitAt + 2);
+      buffer = buffer.slice(splitAt + 2);
+
+      parseSSEChunk(ready, (event, data) => {
+        if (event === 'log') {
+          appendTerminalLine(data);
+        } else if (event === 'step') {
+          lastStep = data.step;
+          renderStepProgress(lastStep, '');
+        } else if (event === 'success') {
+          _dmCurrentDeploymentId = data.azureDeploymentId;
+          document.getElementById('dm-terminal-spinner').style.display = 'none';
+          // Mark all steps done
+          renderStepProgress('__done__', '');
+          const resultEl = document.getElementById('dm-result');
+          resultEl.innerHTML = `
+            <div style="padding:12px 14px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);border-radius:6px;">
+              <div style="color:#4ade80;font-weight:600;margin-bottom:4px;">✓ Deployment successful!</div>
+              ${data.url ? `<a href="${escapeHtml(data.url)}" target="_blank" rel="noopener" style="color:var(--azure);font-size:13px;">${escapeHtml(data.url)}</a>` : ''}
+            </div>`;
+          resultEl.style.display = 'block';
+          document.getElementById('dm-post-actions').style.display = 'flex';
+          document.getElementById('deployModalTitle').textContent = `✓ ${name} deployed`;
+          loadTrackedApps();
+          loadLiveApps();
+        } else if (event === 'error') {
+          _dmCurrentDeploymentId = data.azureDeploymentId;
+          document.getElementById('dm-terminal-spinner').style.display = 'none';
+          if (data.failedStep) renderStepProgress(data.failedStep, data.failedStep);
+
+          const resultEl = document.getElementById('dm-result');
+          const failedStepHtml = data.failedStep
+            ? `<div style="font-size:12px;margin-top:4px;">Failed at step: <strong>${escapeHtml(data.failedStep)}</strong></div>`
+            : '';
+          resultEl.innerHTML = `
+            <div style="padding:12px 14px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:6px;">
+              <div style="color:#f87171;font-weight:600;margin-bottom:4px;">✕ Deployment failed</div>
+              ${failedStepHtml}
+              <div style="font-size:12px;margin-top:6px;color:var(--muted);white-space:pre-wrap;max-height:120px;overflow-y:auto;">${escapeHtml((data.message || '').slice(0, 600))}${(data.message || '').length > 600 ? '…' : ''}</div>
+            </div>`;
+          resultEl.style.display = 'block';
+          document.getElementById('dm-post-actions').style.display = 'flex';
+          document.getElementById('deployModalTitle').textContent = `✕ ${name} failed`;
+          loadTrackedApps();
+        }
+      });
+    }
+
+    // Handle any remaining buffer
+    if (buffer.trim()) {
+      parseSSEChunk(buffer + '\n\n', (event, data) => {
+        if (event === 'log')     appendTerminalLine(data);
+        if (event === 'success') document.getElementById('dm-terminal-spinner').style.display = 'none';
+        if (event === 'error')   document.getElementById('dm-terminal-spinner').style.display = 'none';
+      });
+    }
+
   } catch (err) {
-    // If Azure rejected the deployment because of a region restriction or policy,
-    // automatically refresh the region list so the dropdown only shows valid regions.
+    // Handle region/policy errors gracefully
     const isRegionError = /location|region|not available|policy|GeoPairWith|availability zone/i.test(err.message || '');
     if (isRegionError) {
-      _regionsCache = null; // bust client cache
-      await loadRegions(true); // force server cache bust + repopulate dropdowns
-      showToast(
-        `Region rejected by Azure — the dropdown has been refreshed with allowed regions. Please select another and try again. (${err.message})`,
-        'error'
-      );
+      _regionsCache = null;
+      await loadRegions(true);
+      // Show on form screen if we haven't switched yet
+      if (document.getElementById('dm-form').style.display !== 'none') {
+        showToast(`Region rejected — dropdown refreshed. Select another and retry. (${err.message})`, 'error');
+      } else {
+        document.getElementById('dm-terminal-spinner').style.display = 'none';
+        const resultEl = document.getElementById('dm-result');
+        resultEl.innerHTML = `<div style="padding:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;">${escapeHtml(err.message)}</div>`;
+        resultEl.style.display = 'block';
+        document.getElementById('dm-post-actions').style.display = 'flex';
+      }
     } else {
-      showToast(err.message, 'error');
+      if (document.getElementById('dm-log-screen').style.display !== 'none') {
+        document.getElementById('dm-terminal-spinner').style.display = 'none';
+        const resultEl = document.getElementById('dm-result');
+        resultEl.innerHTML = `<div style="padding:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;">${escapeHtml(err.message)}</div>`;
+        resultEl.style.display = 'block';
+        document.getElementById('dm-post-actions').style.display = 'flex';
+      } else {
+        showToast(err.message, 'error');
+        btn.disabled    = false;
+        btn.textContent = '🚀 Deploy';
+      }
     }
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🚀 Deploy';
+  }
+});
+
+// "View Deployment Logs" post-deploy button
+document.getElementById('dm-view-logs-btn').addEventListener('click', () => {
+  if (_dmCurrentDeploymentId) {
+    openDeployLog(_dmCurrentDeploymentId);
+  } else {
+    showToast('No deployment ID available yet', 'error');
   }
 });
 
@@ -1016,13 +1386,14 @@ async function openAppDetail(rg, name, trackedId) {
         <button class="btn btn-ghost btn-sm"   onclick="appAction('stop','${escapeHtml(rg)}','${escapeHtml(name)}')">■ Stop</button>
         <button class="btn btn-ghost btn-sm"   onclick="closeModal('appDetailModal');showTab('env-vars');setEnvVarsApp('${escapeHtml(rg)}','${escapeHtml(name)}')">⚙ Env Vars</button>
         <button class="btn btn-ghost btn-sm"   onclick="closeModal('appDetailModal');openScaleModal('${escapeHtml(rg)}','${escapeHtml(app.name || name)}')">⇅ Scale</button>
+        <button class="btn btn-ghost btn-sm"   onclick="closeModal('appDetailModal');openDeployHistoryForApp('${escapeHtml(rg)}','${escapeHtml(name)}')">📋 Deploy Logs</button>
         <button class="btn btn-danger btn-sm"  onclick="confirmDeleteApp('${escapeHtml(rg)}','${escapeHtml(name)}');closeModal('appDetailModal');">🗑 Delete</button>
       </div>`;
   } catch {
-    // Fallback for apps only tracked locally
     document.getElementById('appDetailBody').innerHTML = `
       <p style="color:var(--muted);">This app is tracked locally. It may not exist yet in Azure, or you may need to deploy it first.</p>
       <div class="app-detail-actions">
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('appDetailModal');openDeployHistoryForApp('${escapeHtml(rg)}','${escapeHtml(trackedId)}')">📋 Deploy Logs</button>
         <button class="btn btn-danger btn-sm" onclick="deleteTrackedApp('${escapeHtml(trackedId)}')">Remove from Firebox</button>
       </div>`;
   }
@@ -1047,7 +1418,6 @@ function closeModal(id) {
 }
 
 function parseAzureId(id) {
-  // /subscriptions/{sub}/resourceGroups/{rg}/providers/.../sites/{name}
   const rgMatch   = id.match(/resourceGroups\/([^/]+)/i);
   const nameMatch = id.match(/sites\/([^/]+)$/i);
   return [rgMatch?.[1] || '', nameMatch?.[1] || ''];
@@ -1062,11 +1432,11 @@ async function populateAppSelectors() {
       const [rg, name] = parseAzureId(a.id || '');
       return `<option value='${JSON.stringify({ rg, name })}'>${escapeHtml(a.name)}</option>`;
     }).join('');
-    ['monitorApp', 'logsApp', 'domainsApp', 'envVarsApp'].forEach((id) => {
+    ['monitorApp', 'logsApp', 'domainsApp', 'envVarsApp', 'historyApp'].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = `<option value="">Select app…</option>${options}`;
     });
-  } catch { /* ignore — user can still type */ }
+  } catch { /* ignore */ }
 }
 
 async function populateRgDropdown(selectId) {
@@ -1083,7 +1453,10 @@ async function populateRgDropdown(selectId) {
 // Close modals on backdrop click
 document.querySelectorAll('.modal-overlay').forEach((overlay) => {
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.classList.remove('open');
+    if (e.target === overlay) {
+      overlay.classList.remove('open');
+      if (overlay.id === 'deployModal') resetDeployModal();
+    }
   });
 });
 
