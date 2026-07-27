@@ -62,6 +62,10 @@ router.post('/apps/:resourceGroup/:name/domains',             ctrl.addDomain);
 router.delete('/apps/:resourceGroup/:name/domains/:hostname', ctrl.removeDomain);
 
 // ── Scaling
-router.post('/plans/:resourceGroup/:planName/scale', ctrl.scaleApp);
+router.get('/plans/:resourceGroup/:planName/instance-count', ctrl.getInstanceCount);
+router.post('/plans/:resourceGroup/:planName/scale',         ctrl.scaleApp);
+
+// ── fireboxdeploy.toml auto-detect
+router.get('/toml-detect', ctrl.detectToml);
 
 module.exports = router;

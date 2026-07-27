@@ -365,14 +365,10 @@ async function getMetrics(resourceGroup, appName, range = '24h') {
   const resourceId = `/subscriptions/${subId}/resourceGroups/${resourceGroup}/providers/Microsoft.Web/sites/${appName}`;
   const metricNames = 'CpuTime,MemoryWorkingSet,BytesReceived,BytesSent,Requests,AverageResponseTime,Http5xx';
 
-  try {
-    const res = await azureRequest('GET',
-      managementUrl(`${resourceId}/providers/microsoft.insights/metrics?api-version=2023-10-01&metricnames=${metricNames}&timespan=${startTime}/${endTime}&interval=${interval}&aggregation=Average,Total`)
-    );
-    return res.value || [];
-  } catch {
-    return [];
-  }
+  const res = await azureRequest('GET',
+    managementUrl(`${resourceId}/providers/microsoft.insights/metrics?api-version=2023-10-01&metricnames=${metricNames}&timespan=${startTime}/${endTime}&interval=${interval}&aggregation=Average,Total`)
+  );
+  return res.value || [];
 }
 
 // ── Logs ───────────────────────────────────────────────────────────────────
@@ -380,14 +376,37 @@ async function getMetrics(resourceGroup, appName, range = '24h') {
 async function getRecentLogs(resourceGroup, appName) {
   const creds = await getDecryptedCredentials();
   const subId = creds.subscriptionId;
-  try {
-    const res = await azureRequest('GET',
-      managementUrl(`/subscriptions/${subId}/resourceGroups/${encodeURIComponent(resourceGroup)}/providers/Microsoft.Web/sites/${encodeURIComponent(appName)}/deployments?api-version=2022-03-01&$top=5`)
-    );
-    return res.value || [];
-  } catch {
-    return [];
-  }
+
+  // Fetch deployment history (the primary log source for App Service)
+  const res = await azureRequest('GET',
+    managementUrl(`/subscriptions/${subId}/resourceGroups/${encodeURIComponent(resourceGroup)}/providers/Microsoft.Web/sites/${encodeURIComponent(appName)}/deployments?api-version=2022-03-01`)
+  );
+  const deployments = res.value || [];
+
+  // For each deployment, try to fetch its detailed log entries
+  const detailed = await Promise.allSettled(
+    deployments.slice(0, 10).map(async (dep) => {
+      if (!dep.name) return dep;
+      try {
+        const logRes = await azureRequest('GET',
+          managementUrl(`/subscriptions/${subId}/resourceGroups/${encodeURIComponent(resourceGroup)}/providers/Microsoft.Web/sites/${encodeURIComponent(appName)}/deployments/${dep.name}/log?api-version=2022-03-01`)
+        );
+        return { ...dep, logEntries: logRes.value || [] };
+      } catch {
+        return dep;
+      }
+    })
+  );
+
+  return detailed.map((r) => r.status === 'fulfilled' ? r.value : r.reason);
+}
+
+async function getAppInstanceCount(resourceGroup, planName) {
+  const creds = await getDecryptedCredentials();
+  const res = await azureRequest('GET',
+    managementUrl(`/subscriptions/${creds.subscriptionId}/resourceGroups/${encodeURIComponent(resourceGroup)}/providers/Microsoft.Web/serverfarms/${encodeURIComponent(planName)}?api-version=2022-03-01`)
+  );
+  return res?.sku?.capacity ?? 1;
 }
 
 // ── Custom Domains ─────────────────────────────────────────────────────────
@@ -433,24 +452,20 @@ async function getCostSummary() {
   const now   = new Date();
   const from  = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
   const to    = now.toISOString().slice(0, 10);
-  try {
-    const res = await azureRequest('POST',
-      managementUrl(`/subscriptions/${subId}/providers/Microsoft.CostManagement/query?api-version=2023-11-01`),
-      {
-        type: 'ActualCost',
-        timeframe: 'Custom',
-        timePeriod: { from, to },
-        dataset: {
-          granularity: 'None',
-          aggregation: { totalCost: { name: 'Cost', function: 'Sum' } },
-          grouping: [{ type: 'Dimension', name: 'ResourceType' }],
-        },
-      }
-    );
-    return res;
-  } catch {
-    return null;
-  }
+  const res = await azureRequest('POST',
+    managementUrl(`/subscriptions/${subId}/providers/Microsoft.CostManagement/query?api-version=2023-11-01`),
+    {
+      type: 'ActualCost',
+      timeframe: 'Custom',
+      timePeriod: { from, to },
+      dataset: {
+        granularity: 'None',
+        aggregation: { totalCost: { name: 'Cost', function: 'Sum' } },
+        grouping: [{ type: 'Dimension', name: 'ResourceType' }],
+      },
+    }
+  );
+  return res;
 }
 
 // ── Status check ───────────────────────────────────────────────────────────
@@ -519,6 +534,7 @@ module.exports = {
 
   getMetrics,
   getRecentLogs,
+  getAppInstanceCount,
 
   listHostNames,
   addCustomDomain,

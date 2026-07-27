@@ -3,8 +3,9 @@
  * Request handlers for all Azure API routes.
  */
 
-const azure   = require('../services/azure.service');
-const AzureApp = require('../models/AzureApp');
+const azure       = require('../services/azure.service');
+const AzureApp    = require('../models/AzureApp');
+const tomlService = require('../services/fireboxdeploy-toml.service');
 
 // ── Credentials & Status ───────────────────────────────────────────────────
 
@@ -235,11 +236,31 @@ async function scaleApp(req, res) {
   res.json({ result });
 }
 
+async function getInstanceCount(req, res) {
+  const { resourceGroup, planName } = req.params;
+  const count = await azure.getAppInstanceCount(resourceGroup, planName);
+  res.json({ instanceCount: count });
+}
+
 // ── Cost ───────────────────────────────────────────────────────────────────
 
 async function getCost(req, res) {
-  const cost = await azure.getCostSummary();
-  res.json({ cost });
+  try {
+    const cost = await azure.getCostSummary();
+    res.json({ cost });
+  } catch {
+    // Cost Management API may not be available on all subscriptions
+    res.json({ cost: null });
+  }
+}
+
+// ── fireboxdeploy.toml auto-detect ─────────────────────────────────────────
+
+async function detectToml(req, res) {
+  const { repo, branch = 'main' } = req.query;
+  if (!repo) return res.status(400).json({ error: 'repo is required' });
+  const config = await tomlService.fetchFromGitHub(repo, branch);
+  res.json({ config });
 }
 
 // ── FireboxDeploy-tracked Azure Apps ──────────────────────────────────────
@@ -301,7 +322,8 @@ module.exports = {
   getMetrics,
   getLogs,
   listDomains, addDomain, removeDomain,
-  scaleApp,
+  scaleApp, getInstanceCount,
   getCost,
+  detectToml,
   listTrackedApps, createTrackedApp, deleteTrackedApp,
 };

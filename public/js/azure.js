@@ -86,6 +86,7 @@ function showTab(name) {
   if (name === 'apps')             loadLiveApps();
   if (name === 'resource-groups')  loadResourceGroups();
   if (name === 'cost')             loadCost();
+  if (name === 'env-vars' && !document.querySelector('#envVarRows')) loadEnvVars();
 }
 
 document.getElementById('azureTabs').addEventListener('click', (e) => {
@@ -341,6 +342,158 @@ function formatMetricValue(v, unit) {
   return v.toFixed(2);
 }
 
+// ── Environment Variables ──────────────────────────────────────────────────
+
+let currentEnvApp = { rg: '', name: '' };
+
+function setEnvVarsApp(rg, name) {
+  const sel = document.getElementById('envVarsApp');
+  if (!sel) return;
+  // Try to find and select the matching option
+  for (const opt of sel.options) {
+    try {
+      const val = JSON.parse(opt.value);
+      if (val.rg === rg && val.name === name) { sel.value = opt.value; break; }
+    } catch { /* skip */ }
+  }
+  currentEnvApp = { rg, name };
+  loadEnvVars();
+}
+
+async function loadEnvVars() {
+  const sel = document.getElementById('envVarsApp');
+  const val = sel?.value;
+  const panel = document.getElementById('envVarsPanel');
+
+  let rg, name;
+  if (val) {
+    const parsed = JSON.parse(val);
+    rg   = parsed.rg;
+    name = parsed.name;
+    currentEnvApp = { rg, name };
+  } else if (currentEnvApp.rg) {
+    rg   = currentEnvApp.rg;
+    name = currentEnvApp.name;
+  } else {
+    showToast('Select an app first', 'error');
+    return;
+  }
+
+  panel.innerHTML = '<div class="azure-loading"><div class="spinner"></div>Loading environment variables…</div>';
+
+  try {
+    const { settings } = await apiFetch(`/api/azure/apps/${encodeURIComponent(rg)}/${encodeURIComponent(name)}/env`);
+    renderEnvVars(settings, rg, name);
+  } catch (err) {
+    panel.innerHTML = `<div class="empty"><p style="color:var(--danger);">${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function renderEnvVars(settings, rg, name) {
+  const panel = document.getElementById('envVarsPanel');
+  const entries = Object.entries(settings || {});
+
+  const rows = entries.map(([k, v]) => envVarRow(k, v)).join('');
+
+  panel.innerHTML = `
+  <div class="card" style="padding:20px;">
+    <div class="env-vars-header">
+      <div style="font-size:13px;color:var(--muted);">${entries.length} variable${entries.length !== 1 ? 's' : ''} — changes are applied immediately on save.</div>
+    </div>
+    <div id="envVarRows" style="margin-top:16px;">${rows}</div>
+    <div class="env-vars-footer">
+      <button class="btn btn-ghost btn-sm" onclick="addEnvVarRow()">＋ Add Variable</button>
+      <div class="gap-8">
+        <button class="btn btn-primary btn-sm" onclick="saveEnvVars('${escapeHtml(rg)}','${escapeHtml(name)}')">Save Changes</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function envVarRow(key = '', value = '') {
+  return `
+  <div class="env-var-row">
+    <input class="env-key" placeholder="KEY" value="${escapeHtml(key)}" spellcheck="false" autocomplete="off" />
+    <input class="env-val" placeholder="value" value="${escapeHtml(value)}" spellcheck="false" autocomplete="off" />
+    <button class="btn btn-ghost btn-sm btn-icon env-remove" title="Remove" onclick="this.closest('.env-var-row').remove()">✕</button>
+  </div>`;
+}
+
+function addEnvVarRow() {
+  const container = document.getElementById('envVarRows');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.innerHTML = envVarRow();
+  container.appendChild(div.firstElementChild);
+  container.querySelector('.env-var-row:last-child .env-key')?.focus();
+}
+
+async function saveEnvVars(rg, name) {
+  const rows = document.querySelectorAll('#envVarRows .env-var-row');
+  const settings = {};
+  let hasError = false;
+  rows.forEach((row) => {
+    const key = row.querySelector('.env-key').value.trim();
+    const val = row.querySelector('.env-val').value;
+    if (key) settings[key] = val;
+    else if (val) hasError = true;
+  });
+  if (hasError) { showToast('All keys must be non-empty', 'error'); return; }
+
+  try {
+    await apiFetch(`/api/azure/apps/${encodeURIComponent(rg)}/${encodeURIComponent(name)}/env`, {
+      method: 'PUT',
+      body: JSON.stringify({ settings }),
+    });
+    showToast('Environment variables saved — app will restart to apply changes', 'success');
+    loadEnvVars();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ── Scaling ────────────────────────────────────────────────────────────────
+
+let _scaleContext = { rg: '', planName: '' };
+
+async function openScaleModal(rg, appName) {
+  // Look up the plan name from allLiveApps
+  const app = allLiveApps.find((a) => a.name === appName);
+  const planId = app?.properties?.serverFarmId || '';
+  const planName = planId.split('/').pop() || `${appName}-plan`;
+  _scaleContext = { rg, planName };
+
+  document.getElementById('scalePlanName').textContent = planName;
+
+  // Try to fetch current instance count
+  try {
+    const { instanceCount } = await apiFetch(`/api/azure/plans/${encodeURIComponent(rg)}/${encodeURIComponent(planName)}/instance-count`);
+    document.getElementById('scaleSlider').value = instanceCount;
+    document.getElementById('scaleCountDisplay').textContent = instanceCount;
+  } catch {
+    document.getElementById('scaleSlider').value = 1;
+    document.getElementById('scaleCountDisplay').textContent = 1;
+  }
+
+  document.getElementById('scaleModal').classList.add('open');
+}
+
+document.getElementById('confirmScaleBtn').addEventListener('click', async () => {
+  const { rg, planName } = _scaleContext;
+  if (!rg || !planName) { showToast('No plan selected', 'error'); return; }
+  const count = parseInt(document.getElementById('scaleSlider').value, 10);
+  try {
+    await apiFetch(`/api/azure/plans/${encodeURIComponent(rg)}/${encodeURIComponent(planName)}/scale`, {
+      method: 'POST',
+      body: JSON.stringify({ instanceCount: count }),
+    });
+    showToast(`Scaled to ${count} instance${count !== 1 ? 's' : ''}`, 'success');
+    closeModal('scaleModal');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+});
+
 // ── Logs ───────────────────────────────────────────────────────────────────
 
 async function loadLogs() {
@@ -354,17 +507,44 @@ async function loadLogs() {
 
   try {
     const { logs } = await apiFetch(`/api/azure/apps/${encodeURIComponent(rg)}/${encodeURIComponent(name)}/logs`);
-    if (!logs.length) {
-      term.innerHTML = '<span style="color:var(--muted-2);">No deployment logs found.</span>';
+    if (!logs || !logs.length) {
+      term.innerHTML = '<span style="color:var(--muted-2);">No deployment logs found. Trigger a deployment to generate log entries.</span>';
       return;
     }
-    term.innerHTML = logs.map((d) => {
-      const ts      = d.properties?.startTime ? new Date(d.properties.startTime).toLocaleString() : '';
-      const status  = d.properties?.status || '';
-      const message = d.properties?.message || d.properties?.deploymentLogs || `Deployment ${d.name}`;
-      const cls     = status === 'success' ? 'success' : status === 'failed' ? 'error' : 'info';
-      return `<div class="line ${cls}"><span class="ts">${escapeHtml(ts)}</span>${escapeHtml(message)}</div>`;
-    }).join('');
+
+    const lines = [];
+    for (const dep of logs) {
+      const props = dep.properties || {};
+      const startTs = props.startTime ? new Date(props.startTime).toLocaleString() : '';
+      const endTs   = props.endTime   ? new Date(props.endTime).toLocaleString()   : '';
+      const status  = props.status    || 'unknown';
+      const author  = props.author    || '';
+      const message = props.message   || props.deploymentLogs || `Deployment ${dep.name || ''}`;
+      const cls     = status === 'success' ? 'success' : (status === 'failed' || status === 'Failed') ? 'error' : 'info';
+
+      lines.push(`<div class="line ${cls}"><span class="ts">${escapeHtml(startTs)}</span>▶ Deployment started${author ? ` by ${escapeHtml(author)}` : ''}</div>`);
+      lines.push(`<div class="line ${cls}"><span class="ts"></span>${escapeHtml(message)}</div>`);
+
+      // Show detailed sub-log entries if available
+      if (Array.isArray(dep.logEntries) && dep.logEntries.length) {
+        for (const entry of dep.logEntries) {
+          const ep = entry.properties || {};
+          const entryTs  = ep.logTime ? new Date(ep.logTime).toLocaleString() : '';
+          const entryMsg = ep.message || '';
+          const entryLvl = ep.type === 'Error' ? 'error' : 'info';
+          if (entryMsg) {
+            lines.push(`<div class="line ${entryLvl}" style="padding-left:24px;"><span class="ts">${escapeHtml(entryTs)}</span>${escapeHtml(entryMsg)}</div>`);
+          }
+        }
+      }
+
+      if (endTs) {
+        lines.push(`<div class="line ${cls}"><span class="ts">${escapeHtml(endTs)}</span>■ Deployment ${status}${props.complete ? '' : ' (in progress)'}</div>`);
+      }
+      lines.push('<div class="line" style="border-top:1px solid rgba(255,255,255,.06);margin:4px 0;padding:0;"></div>');
+    }
+
+    term.innerHTML = lines.join('');
     term.scrollTop = term.scrollHeight;
   } catch (err) {
     term.innerHTML = `<div class="line error">${escapeHtml(err.message)}</div>`;
@@ -557,6 +737,34 @@ function openDeployModal() {
 document.getElementById('deployBtn').addEventListener('click', openDeployModal);
 document.getElementById('deployFirstBtn') && document.getElementById('deployFirstBtn').addEventListener('click', openDeployModal);
 
+// Auto-fill deploy modal from fireboxdeploy.toml when repo URL is entered
+document.getElementById('dm-repo').addEventListener('blur', async () => {
+  const repoUrl = document.getElementById('dm-repo').value.trim();
+  const branch  = document.getElementById('dm-branch').value.trim() || 'main';
+  if (!repoUrl) return;
+  try {
+    const { config } = await apiFetch(`/api/azure/toml-detect?repo=${encodeURIComponent(repoUrl)}&branch=${encodeURIComponent(branch)}`);
+    if (!config) return;
+    if (config.name  && !document.getElementById('dm-name').value)    document.getElementById('dm-name').value  = config.name;
+    if (config.buildCommand)  document.getElementById('dm-build').value = config.buildCommand;
+    if (config.startCommand)  document.getElementById('dm-start').value = config.startCommand;
+    if (config.branch)        document.getElementById('dm-branch').value = config.branch;
+    if (config.region) {
+      const regionSel = document.getElementById('dm-region');
+      if ([...regionSel.options].some((o) => o.value === config.region)) regionSel.value = config.region;
+    }
+    if (config.planSku) {
+      const skuSel = document.getElementById('dm-sku');
+      if ([...skuSel.options].some((o) => o.value === config.planSku)) skuSel.value = config.planSku;
+    }
+    if (config.runtimeStack) {
+      const rtSel = document.getElementById('dm-runtime');
+      if ([...rtSel.options].some((o) => o.value === config.runtimeStack)) rtSel.value = config.runtimeStack;
+    }
+    showToast('Auto-filled from fireboxdeploy.toml', 'success');
+  } catch { /* file not found or not a GitHub repo — ignore */ }
+});
+
 document.getElementById('confirmDeployBtn').addEventListener('click', async () => {
   const name    = document.getElementById('dm-name').value.trim();
   const rg      = document.getElementById('dm-rg').value;
@@ -676,6 +884,8 @@ async function openAppDetail(rg, name, trackedId) {
         <button class="btn btn-primary btn-sm" onclick="appAction('restart','${escapeHtml(rg)}','${escapeHtml(name)}');closeModal('appDetailModal');">↻ Restart</button>
         <button class="btn btn-ghost btn-sm"   onclick="appAction('start','${escapeHtml(rg)}','${escapeHtml(name)}')">▶ Start</button>
         <button class="btn btn-ghost btn-sm"   onclick="appAction('stop','${escapeHtml(rg)}','${escapeHtml(name)}')">■ Stop</button>
+        <button class="btn btn-ghost btn-sm"   onclick="closeModal('appDetailModal');showTab('env-vars');setEnvVarsApp('${escapeHtml(rg)}','${escapeHtml(name)}')">⚙ Env Vars</button>
+        <button class="btn btn-ghost btn-sm"   onclick="closeModal('appDetailModal');openScaleModal('${escapeHtml(rg)}','${escapeHtml(app.name || name)}')">⇅ Scale</button>
         <button class="btn btn-danger btn-sm"  onclick="confirmDeleteApp('${escapeHtml(rg)}','${escapeHtml(name)}');closeModal('appDetailModal');">🗑 Delete</button>
       </div>`;
   } catch {
@@ -722,7 +932,7 @@ async function populateAppSelectors() {
       const [rg, name] = parseAzureId(a.id || '');
       return `<option value='${JSON.stringify({ rg, name })}'>${escapeHtml(a.name)}</option>`;
     }).join('');
-    ['monitorApp', 'logsApp', 'domainsApp'].forEach((id) => {
+    ['monitorApp', 'logsApp', 'domainsApp', 'envVarsApp'].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = `<option value="">Select app…</option>${options}`;
     });

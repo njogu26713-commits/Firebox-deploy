@@ -76,6 +76,7 @@
           <div class="tab" data-tab="monitoring">Monitoring</div>
           <div class="tab" data-tab="logs">Logs</div>
           <div class="tab" data-tab="domains">Domains</div>
+          <div class="tab" data-tab="env-vars">Env Vars</div>
           <div class="tab" data-tab="cost">Cost</div>
           <div class="tab" data-tab="settings">Settings</div>
         </div>
@@ -179,6 +180,20 @@
           </div>
           <div id="domainsPanel">
             <div class="empty"><p>Select an app to manage its domains.</p></div>
+          </div>
+        </div>
+
+        <!-- ── Environment Variables ──────────────────────────── -->
+        <div class="tab-panel" id="panel-env-vars">
+          <div class="flex-between" style="margin-bottom:16px;">
+            <h3>Environment Variables</h3>
+            <div class="gap-8">
+              <select id="envVarsApp" style="width:220px;"><option value="">Select app…</option></select>
+              <button class="btn btn-ghost btn-sm" onclick="loadEnvVars()">↻ Load</button>
+            </div>
+          </div>
+          <div id="envVarsPanel">
+            <div class="empty"><p>Select an app to view and edit its environment variables.</p></div>
           </div>
         </div>
 
@@ -369,6 +384,33 @@
       <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('appDetailModal')">✕</button>
     </div>
     <div id="appDetailBody"></div>
+  </div>
+</div>
+
+<!-- ── Scale Modal ───────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="scaleModal">
+  <div class="modal" style="max-width:420px;">
+    <div class="flex-between" style="margin-bottom:18px;">
+      <h3>Scale App</h3>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('scaleModal')">✕</button>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:18px;">Adjust the number of instances for the App Service Plan. Scaling affects all apps sharing the same plan.</p>
+    <div class="field">
+      <label>App Service Plan</label>
+      <div id="scalePlanName" style="font-family:var(--font-mono);font-size:13px;padding:6px 0;color:var(--muted);">—</div>
+    </div>
+    <div class="field">
+      <label>Instance Count</label>
+      <div class="scale-slider-wrap">
+        <input type="range" id="scaleSlider" min="1" max="10" value="1" oninput="document.getElementById('scaleCountDisplay').textContent=this.value" />
+        <div class="scale-count-display" id="scaleCountDisplay">1</div>
+      </div>
+      <div class="field-hint">F1 (Free) tier does not support scaling beyond 1 instance.</div>
+    </div>
+    <div class="gap-8" style="margin-top:8px;">
+      <button class="btn btn-primary" id="confirmScaleBtn">Apply Scale</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('scaleModal')">Cancel</button>
+    </div>
   </div>
 </div>
 
