@@ -593,38 +593,59 @@ async function loadLogs() {
   try {
     const { logs } = await apiFetch(`/api/azure/apps/${encodeURIComponent(rg)}/${encodeURIComponent(name)}/logs`);
     if (!logs || !logs.length) {
-      term.innerHTML = '<span style="color:var(--muted-2);">No deployment logs found. Trigger a deployment to generate log entries.</span>';
+      term.innerHTML = '<span style="color:var(--muted-2);">No activity found in the last 7 days for this app.</span>';
       return;
     }
 
     const lines = [];
-    for (const dep of logs) {
-      const props = dep.properties || {};
+    for (const entry of logs) {
+      const props = entry.properties || {};
       const startTs = props.startTime ? new Date(props.startTime).toLocaleString() : '';
-      const endTs   = props.endTime   ? new Date(props.endTime).toLocaleString()   : '';
-      const status  = props.status    || 'unknown';
-      const author  = props.author    || '';
-      const message = props.message   || props.deploymentLogs || `Deployment ${dep.name || ''}`;
-      const cls     = status === 'success' ? 'success' : (status === 'failed' || status === 'Failed') ? 'error' : 'info';
+      const status  = (props.status || 'unknown').toLowerCase();
+      const author  = props.author || '';
 
-      lines.push(`<div class="line ${cls}"><span class="ts">${escapeHtml(startTs)}</span>▶ Deployment started${author ? ` by ${escapeHtml(author)}` : ''}</div>`);
-      lines.push(`<div class="line ${cls}"><span class="ts"></span>${escapeHtml(message)}</div>`);
+      if (entry._type === 'activity') {
+        // Azure Activity Log event (start/stop/restart/config/deploy operations)
+        const level   = (props.level || 'Informational').toLowerCase();
+        const cls     = level === 'error' || level === 'critical' ? 'error'
+                      : level === 'warning' ? 'warn'
+                      : status === 'failed' ? 'error'
+                      : 'info';
+        const icon    = cls === 'error' ? '✕' : cls === 'warn' ? '⚠' : '●';
+        const opName  = entry.name || 'Operation';
+        const msg     = props.message || opName;
+        lines.push(
+          `<div class="line ${cls}">` +
+          `<span class="ts">${escapeHtml(startTs)}</span>` +
+          `${icon} ${escapeHtml(opName)}` +
+          (author ? ` <span style="opacity:.6;font-size:.85em">by ${escapeHtml(author)}</span>` : '') +
+          (msg !== opName ? ` — ${escapeHtml(msg)}` : '') +
+          `</div>`
+        );
+      } else {
+        // Kudu deployment pipeline entry
+        const endTs   = props.endTime ? new Date(props.endTime).toLocaleString() : '';
+        const message = props.message || props.deploymentLogs || `Deployment ${entry.name || ''}`;
+        const cls     = status === 'success' ? 'success' : (status === 'failed') ? 'error' : 'info';
 
-      // Show detailed sub-log entries if available
-      if (Array.isArray(dep.logEntries) && dep.logEntries.length) {
-        for (const entry of dep.logEntries) {
-          const ep = entry.properties || {};
-          const entryTs  = ep.logTime ? new Date(ep.logTime).toLocaleString() : '';
-          const entryMsg = ep.message || '';
-          const entryLvl = ep.type === 'Error' ? 'error' : 'info';
-          if (entryMsg) {
-            lines.push(`<div class="line ${entryLvl}" style="padding-left:24px;"><span class="ts">${escapeHtml(entryTs)}</span>${escapeHtml(entryMsg)}</div>`);
+        lines.push(`<div class="line ${cls}"><span class="ts">${escapeHtml(startTs)}</span>▶ Deployment started${author ? ` by ${escapeHtml(author)}` : ''}</div>`);
+        lines.push(`<div class="line ${cls}"><span class="ts"></span>${escapeHtml(message)}</div>`);
+
+        if (Array.isArray(entry.logEntries) && entry.logEntries.length) {
+          for (const le of entry.logEntries) {
+            const ep      = le.properties || {};
+            const leTs    = ep.logTime ? new Date(ep.logTime).toLocaleString() : '';
+            const leMsg   = ep.message || '';
+            const leCls   = ep.type === 'Error' ? 'error' : 'info';
+            if (leMsg) {
+              lines.push(`<div class="line ${leCls}" style="padding-left:24px;"><span class="ts">${escapeHtml(leTs)}</span>${escapeHtml(leMsg)}</div>`);
+            }
           }
         }
-      }
 
-      if (endTs) {
-        lines.push(`<div class="line ${cls}"><span class="ts">${escapeHtml(endTs)}</span>■ Deployment ${status}${props.complete ? '' : ' (in progress)'}</div>`);
+        if (endTs) {
+          lines.push(`<div class="line ${cls}"><span class="ts">${escapeHtml(endTs)}</span>■ Deployment ${status}${props.complete ? '' : ' (in progress)'}</div>`);
+        }
       }
       lines.push('<div class="line" style="border-top:1px solid rgba(255,255,255,.06);margin:4px 0;padding:0;"></div>');
     }

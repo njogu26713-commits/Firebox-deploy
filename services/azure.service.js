@@ -412,28 +412,60 @@ async function getRecentLogs(resourceGroup, appName) {
   const creds = await getDecryptedCredentials();
   const subId = creds.subscriptionId;
 
-  // Fetch deployment history (the primary log source for App Service)
-  const res = await azureRequest('GET',
-    managementUrl(`/subscriptions/${subId}/resourceGroups/${encodeURIComponent(resourceGroup)}/providers/Microsoft.Web/sites/${encodeURIComponent(appName)}/deployments?api-version=2022-03-01`)
-  );
-  const deployments = res.value || [];
+  // Resource ID for this App Service
+  const resourceId = `/subscriptions/${subId}/resourceGroups/${encodeURIComponent(resourceGroup)}/providers/Microsoft.Web/sites/${encodeURIComponent(appName)}`;
 
-  // For each deployment, try to fetch its detailed log entries
+  // ── 1. Azure Activity Logs (always populated; shows starts, stops, restarts, config changes, deployments) ──
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(); // last 7 days
+  const activityFilter = `eventTimestamp ge '${since}' and resourceUri eq '${resourceId}'`;
+  const activityLogsPromise = azureRequest('GET',
+    managementUrl(`/subscriptions/${subId}/providers/microsoft.insights/eventtypes/management/values?api-version=2015-04-01&$filter=${encodeURIComponent(activityFilter)}&$select=eventTimestamp,operationName,status,caller,description,level,properties`)
+  ).catch(() => ({ value: [] }));
+
+  // ── 2. Deployment history (Kudu pipeline; only present when deployed via Azure Deployment Center) ──
+  const deploymentsPromise = azureRequest('GET',
+    managementUrl(`${resourceId}/deployments?api-version=2022-03-01`)
+  ).catch(() => ({ value: [] }));
+
+  const [activityRes, deploymentsRes] = await Promise.all([activityLogsPromise, deploymentsPromise]);
+
+  const activityEvents = (activityRes.value || []).map((ev) => ({
+    _type: 'activity',
+    id: ev.id,
+    name: ev.operationName?.localizedValue || ev.operationName?.value || 'Operation',
+    properties: {
+      startTime:   ev.eventTimestamp,
+      status:      ev.status?.localizedValue || ev.status?.value || 'unknown',
+      author:      ev.caller || '',
+      message:     ev.description || ev.operationName?.localizedValue || ev.operationName?.value || '',
+      level:       ev.level || 'Informational',
+    },
+  }));
+
+  const deployments = (deploymentsRes.value || []);
   const detailed = await Promise.allSettled(
-    deployments.slice(0, 10).map(async (dep) => {
-      if (!dep.name) return dep;
+    deployments.slice(0, 5).map(async (dep) => {
+      if (!dep.name) return { ...dep, _type: 'deployment' };
       try {
         const logRes = await azureRequest('GET',
-          managementUrl(`/subscriptions/${subId}/resourceGroups/${encodeURIComponent(resourceGroup)}/providers/Microsoft.Web/sites/${encodeURIComponent(appName)}/deployments/${dep.name}/log?api-version=2022-03-01`)
+          managementUrl(`${resourceId}/deployments/${dep.name}/log?api-version=2022-03-01`)
         );
-        return { ...dep, logEntries: logRes.value || [] };
+        return { ...dep, _type: 'deployment', logEntries: logRes.value || [] };
       } catch {
-        return dep;
+        return { ...dep, _type: 'deployment' };
       }
     })
   );
+  const deploymentEvents = detailed.map((r) => r.status === 'fulfilled' ? r.value : r.reason);
 
-  return detailed.map((r) => r.status === 'fulfilled' ? r.value : r.reason);
+  // Merge & sort newest-first
+  const all = [...activityEvents, ...deploymentEvents].sort((a, b) => {
+    const ta = new Date(a.properties?.startTime || 0).getTime();
+    const tb = new Date(b.properties?.startTime || 0).getTime();
+    return tb - ta;
+  });
+
+  return all;
 }
 
 async function getAppInstanceCount(resourceGroup, planName) {
