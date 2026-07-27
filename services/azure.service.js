@@ -348,6 +348,50 @@ async function updateAppSettings(resourceGroup, name, settings) {
   );
 }
 
+/**
+ * Kudu deployment credentials are obtained from ARM with the same service
+ * principal used for the rest of the Azure integration. They are short-lived
+ * values returned by Azure and are never persisted by FireboxDeploy.
+ */
+async function getPublishingProfile(resourceGroup, name) {
+  const creds = await getDecryptedCredentials();
+  const token = await getToken();
+  const url = managementUrl(
+    `/subscriptions/${creds.subscriptionId}/resourceGroups/${encodeURIComponent(resourceGroup)}` +
+    `/providers/Microsoft.Web/sites/${encodeURIComponent(name)}/config/publishingprofile/list?api-version=2022-03-01`
+  );
+
+  try {
+    const res = await axios.post(url, null, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/xml' },
+      responseType: 'text',
+    });
+    return res.data;
+  } catch (err) {
+    const wrapped = new Error(extractAzureError(err));
+    wrapped.azureStatus = err.response?.status;
+    wrapped.azureBody = err.response?.data;
+    throw wrapped;
+  }
+}
+
+async function getSiteConfig(resourceGroup, name) {
+  const creds = await getDecryptedCredentials();
+  return azureRequest('GET',
+    managementUrl(`/subscriptions/${creds.subscriptionId}/resourceGroups/${encodeURIComponent(resourceGroup)}` +
+      `/providers/Microsoft.Web/sites/${encodeURIComponent(name)}/config/web?api-version=2022-03-01`)
+  );
+}
+
+async function updateSiteConfig(resourceGroup, name, properties) {
+  const creds = await getDecryptedCredentials();
+  return azureRequest('PUT',
+    managementUrl(`/subscriptions/${creds.subscriptionId}/resourceGroups/${encodeURIComponent(resourceGroup)}` +
+      `/providers/Microsoft.Web/sites/${encodeURIComponent(name)}/config/web?api-version=2022-03-01`),
+    { properties }
+  );
+}
+
 // ── Source Control (Deploy from GitHub) ───────────────────────────────────
 
 async function configureGithubDeploy(resourceGroup, name, repoUrl, branch = 'main') {
@@ -596,6 +640,9 @@ module.exports = {
 
   getAppSettings,
   updateAppSettings,
+  getPublishingProfile,
+  getSiteConfig,
+  updateSiteConfig,
 
   configureGithubDeploy,
   syncDeploy,

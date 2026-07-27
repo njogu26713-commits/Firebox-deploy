@@ -4,7 +4,10 @@
  */
 
 const azure       = require('../services/azure.service');
+const azureDeploy = require('../services/azure-deploy.service');
 const AzureApp    = require('../models/AzureApp');
+const User        = require('../models/User');
+const cryptoSvc   = require('../services/crypto.service');
 const tomlService = require('../services/fireboxdeploy-toml.service');
 
 // ── Credentials & Status ───────────────────────────────────────────────────
@@ -187,11 +190,73 @@ async function updateEnvVars(req, res) {
 
 async function deployFromGitHub(req, res) {
   const { resourceGroup, name } = req.params;
-  const { repoUrl, branch = 'main' } = req.body;
+  const {
+    repoUrl,
+    branch = 'main',
+    rootDir = '.',
+    buildCommand = '',
+    startCommand = '',
+  } = req.body;
   if (!repoUrl) return res.status(400).json({ error: 'repoUrl is required' });
 
-  await azure.configureGithubDeploy(resourceGroup, name, repoUrl, branch);
-  res.json({ success: true, message: 'GitHub source control configured. Azure will begin deploying.' });
+  const userId = req.session.userId || req.userId;
+  const user = await User.findById(userId).select('githubToken');
+  const githubToken = user?.githubToken ? cryptoSvc.decrypt(user.githubToken) : '';
+  const trackedApp = await AzureApp.findOne({ resourceGroup, name });
+
+  if (trackedApp) {
+    trackedApp.status = 'deploying';
+    trackedApp.lastError = '';
+    await trackedApp.save();
+  }
+
+  const logs = [];
+  try {
+    const result = await azureDeploy.deployToAppService({
+      resourceGroup,
+      name,
+      repoUrl,
+      branch,
+      githubToken,
+      rootDir,
+      buildCommand,
+      startCommand,
+      log: (level, message) => logs.push({ level, message, ts: new Date() }),
+    });
+
+    if (trackedApp) {
+      trackedApp.status = 'running';
+      trackedApp.lastError = '';
+      trackedApp.lastDeployedAt = new Date();
+      await trackedApp.save();
+    }
+
+    return res.json({
+      success: true,
+      message: 'Application deployed and verified in Azure App Service.',
+      deploymentId: result.deploymentId,
+      packageManager: result.packageManager,
+      startCommand: result.startCommand,
+      logs: result.logs,
+    });
+  } catch (err) {
+    if (trackedApp) {
+      trackedApp.status = 'failed';
+      trackedApp.lastError = err.message;
+      await trackedApp.save().catch(() => {});
+    }
+
+    // Preserve the complete Kudu/Azure details for callers instead of
+    // reducing an upload failure to a generic HTTP 502.
+    return res.status(err.azureStatus && err.azureStatus >= 400 ? err.azureStatus : 500).json({
+      success: false,
+      error: err.message,
+      azureStatus: err.azureStatus,
+      deploymentId: err.deploymentId,
+      deploymentLog: err.deploymentLog,
+      logs: err.logs || logs,
+    });
+  }
 }
 
 async function syncDeployment(req, res) {

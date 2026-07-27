@@ -920,7 +920,12 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
     if (repoUrl) {
       await apiFetch(`/api/azure/apps/${encodeURIComponent(rg)}/${encodeURIComponent(name)}/deploy`, {
         method: 'POST',
-        body: JSON.stringify({ repoUrl, branch }),
+        body: JSON.stringify({
+          repoUrl,
+          branch,
+          buildCommand: build,
+          startCommand: start,
+        }),
       });
     }
 

@@ -1,1 +1,2 @@
 - [Replit session cookie fix](replit-session-cookie.md) — sameSite:none + trust proxy required for session cookies to work in Replit's iframe preview
+- [Azure deployment artifacts](azure-deployment-artifacts.md) — source-control registration is not proof that App Service has application files
