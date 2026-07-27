@@ -29,6 +29,7 @@ const { notFound, errorHandler } = require('./middleware/error.middleware');
 
 // ── App + HTTP server + Socket.IO ──────────────────────────────────────────
 const app    = express();
+app.set('trust proxy', 1); // Replit / reverse-proxy: treat forwarded HTTPS as secure
 const server = http.createServer(app);
 const io     = new SocketIOServer(server, { cors: { origin: '*' } });
 loggerService.attachIO(io);
@@ -74,9 +75,10 @@ app.use(
     saveUninitialized: false,
     store:             MongoStore.create({ mongoUrl: config.mongoUri }),
     cookie: {
-      maxAge:   1000 * 60 * 60 * 24 * 30, // 30 days
-      httpOnly: true,
-      secure:   config.nodeEnv === 'production',
+      maxAge:    1000 * 60 * 60 * 24 * 30, // 30 days
+      httpOnly:  true,
+      secure:    true,   // always true — Replit always serves over HTTPS
+      sameSite:  'none', // required for cross-site iframe (Replit preview)
     },
   })
 );
