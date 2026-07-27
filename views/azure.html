@@ -237,6 +237,7 @@
             <div class="gap-8">
               <button class="btn btn-primary" id="saveCredsBtn">Save &amp; Connect</button>
               <button class="btn btn-ghost btn-sm" id="testCredsBtn">Test Connection</button>
+              <button class="btn btn-ghost btn-sm" id="refreshRegionsBtnSettings" title="Re-fetch available regions for the connected subscription">↻ Refresh Regions</button>
               <button class="btn btn-danger btn-sm" id="deleteCredsBtn">Disconnect</button>
             </div>
             <div id="credsResult" style="margin-top:14px;display:none;"></div>
@@ -280,18 +281,9 @@
         <select id="dm-rg"><option value="">Loading…</option></select>
       </div>
       <div class="field">
-        <label>Region</label>
-        <select id="dm-region">
-          <option value="eastus">East US</option>
-          <option value="westus2">West US 2</option>
-          <option value="westeurope">West Europe</option>
-          <option value="northeurope">North Europe</option>
-          <option value="southeastasia">Southeast Asia</option>
-          <option value="australiaeast">Australia East</option>
-          <option value="uksouth">UK South</option>
-          <option value="canadacentral">Canada Central</option>
-          <option value="brazilsouth">Brazil South</option>
-        </select>
+        <label>Region <button class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:11px;padding:2px 8px;vertical-align:middle;" onclick="loadRegions(true)" id="refreshRegionsBtn" title="Reload available regions from Azure">↻ Refresh Regions</button></label>
+        <select id="dm-region"><option value="">Loading regions…</option></select>
+        <div id="regionsHint" class="field-hint" style="display:none;"></div>
       </div>
     </div>
     <div class="row">
@@ -359,15 +351,7 @@
     </div>
     <div class="field">
       <label>Location</label>
-      <select id="rg-location">
-        <option value="eastus">East US</option>
-        <option value="westus2">West US 2</option>
-        <option value="westeurope">West Europe</option>
-        <option value="northeurope">North Europe</option>
-        <option value="southeastasia">Southeast Asia</option>
-        <option value="australiaeast">Australia East</option>
-        <option value="uksouth">UK South</option>
-      </select>
+      <select id="rg-location"><option value="">Loading regions…</option></select>
     </div>
     <div class="gap-8">
       <button class="btn btn-primary" id="confirmNewRgBtn">Create</button>

@@ -159,6 +159,41 @@ async function getSubscription() {
   return azureRequest('GET', managementUrl(`/subscriptions/${creds.subscriptionId}?api-version=2022-12-01`));
 }
 
+// ── Locations (Regions) ────────────────────────────────────────────────────
+// Cache is keyed by subscriptionId so swapping subscriptions always fetches fresh.
+
+const _locationCache = new Map(); // key: subscriptionId → { data, expiresAt }
+const LOCATION_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+async function listLocations() {
+  const creds = await getDecryptedCredentials();
+  if (!creds) throw new Error('Azure credentials not configured');
+  const subId = creds.subscriptionId;
+
+  const cached = _locationCache.get(subId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
+  const res = await azureRequest('GET',
+    managementUrl(`/subscriptions/${subId}/locations?api-version=2022-12-01`)
+  );
+
+  // Filter out Edge Zones / Arc Zones — only proper regions are deployable
+  const locations = (res.value || [])
+    .filter((loc) => loc.metadata?.regionType === 'Physical' || (!loc.type || loc.type === 'Region'))
+    .filter((loc) => loc.type !== 'EdgeZone' && loc.type !== 'ArcZone')
+    .map((loc) => ({ name: loc.name, displayName: loc.displayName || loc.name }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+  _locationCache.set(subId, { data: locations, expiresAt: Date.now() + LOCATION_CACHE_TTL_MS });
+  return locations;
+}
+
+function clearLocationCache() {
+  _locationCache.clear();
+}
+
 // ── Dashboard summary ──────────────────────────────────────────────────────
 
 async function getDashboardSummary() {
@@ -509,6 +544,8 @@ module.exports = {
 
   getSubscription,
   getDashboardSummary,
+  listLocations,
+  clearLocationCache,
 
   listResourceGroups,
   createResourceGroup,

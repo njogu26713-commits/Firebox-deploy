@@ -15,6 +15,10 @@ router.delete('/credentials',                    ctrl.deleteCredentials);
 // ── Dashboard summary
 router.get('/dashboard',                         ctrl.getDashboard);
 
+// ── Locations / Regions (dynamic, subscription-scoped)
+router.get('/locations',                         ctrl.listLocations);
+router.post('/locations/refresh',                ctrl.listLocations); // force cache bust
+
 // ── Cost
 router.get('/cost',                              ctrl.getCost);
 

@@ -28,6 +28,7 @@ async function saveCredentials(req, res) {
     return res.status(400).json({ error: 'All four Azure credentials are required' });
   }
   await azure.saveCredentials({ clientId, clientSecret, tenantId, subscriptionId });
+  azure.clearLocationCache(); // subscription may have changed — force fresh region fetch
   // Attempt immediate verification
   const check = await azure.verifyConnection();
   if (!check.ok) {
@@ -62,6 +63,26 @@ async function deleteCredentials(req, res) {
 async function getDashboard(req, res) {
   const summary = await azure.getDashboardSummary();
   res.json(summary);
+}
+
+// ── Locations (Regions) ────────────────────────────────────────────────────
+
+async function listLocations(req, res) {
+  // ?refresh=true or POST busts the server-side cache
+  const force = req.query.refresh === 'true' || req.method === 'POST';
+  if (force) azure.clearLocationCache();
+  try {
+    const locations = await azure.listLocations();
+    if (!locations.length) {
+      return res.json({
+        locations: [],
+        message: 'No deployment regions are available for this subscription.',
+      });
+    }
+    res.json({ locations });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 }
 
 // ── Resource Groups ────────────────────────────────────────────────────────
@@ -314,6 +335,7 @@ async function deleteTrackedApp(req, res) {
 module.exports = {
   getStatus, saveCredentials, verifyConnection, deleteCredentials,
   getDashboard,
+  listLocations,
   listResourceGroups, createResourceGroup, deleteResourceGroup,
   listPlans, createPlan,
   listApps, getApp, createApp, deleteApp, startApp, stopApp, restartApp,

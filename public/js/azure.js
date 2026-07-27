@@ -7,6 +7,7 @@ let azureConfigured = false;
 let allLiveApps = [];
 let allResourceGroups = [];
 let currentDomainsApp = { rg: '', name: '' };
+let _regionsCache = null; // [{ name, displayName }] — client-side cache to avoid redundant API calls
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ async function init() {
   }
 
   loadOverview();
+  loadRegions();
   populateAppSelectors();
 }
 
@@ -71,6 +73,78 @@ function updateStatusBar(status) {
   } else {
     bar.textContent = 'Azure — not configured';
   }
+}
+
+// ── Regions ────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch available regions for the connected subscription from the Azure Management
+ * API and populate every region/location <select> in the UI.
+ *
+ * Uses a client-side cache so rapid modal opens don't re-fetch; pass force=true
+ * (or click "Refresh Regions") to bypass both the client cache and the 30-min
+ * server-side cache.
+ */
+async function loadRegions(force = false) {
+  if (!azureConfigured) return;
+
+  // Fast path: client already has data and caller didn't ask for a refresh
+  if (!force && _regionsCache) {
+    populateRegionSelects(_regionsCache);
+    return;
+  }
+
+  // Show loading state in all region/location dropdowns
+  ['dm-region', 'rg-location'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<option value="">⏳ Loading regions…</option>';
+  });
+  const hint = document.getElementById('regionsHint');
+  if (hint) { hint.style.display = 'none'; hint.textContent = ''; }
+
+  try {
+    const endpoint = force ? '/api/azure/locations?refresh=true' : '/api/azure/locations';
+    const result   = await apiFetch(endpoint);
+    const locations = result.locations || [];
+
+    _regionsCache = locations;
+    populateRegionSelects(locations);
+
+    if (!locations.length) {
+      const msg = result.message || 'No deployment regions are available for this subscription.';
+      if (hint) { hint.textContent = msg; hint.style.display = 'block'; }
+    } else if (force) {
+      showToast(`${locations.length} regions loaded`, 'success');
+    }
+  } catch (err) {
+    const msg = `Could not load regions: ${err.message}`;
+    ['dm-region', 'rg-location'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = `<option value="">${escapeHtml(msg)}</option>`;
+    });
+    if (hint) { hint.textContent = msg; hint.style.display = 'block'; }
+    if (force) showToast(msg, 'error');
+  }
+}
+
+function populateRegionSelects(locations) {
+  if (!locations || !locations.length) {
+    const msg = 'No deployment regions are available for this subscription.';
+    ['dm-region', 'rg-location'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = `<option value="">${escapeHtml(msg)}</option>`;
+    });
+    return;
+  }
+  // value = Azure location name (e.g. "eastus")
+  // text  = friendly display name (e.g. "East US")
+  const options = locations
+    .map((loc) => `<option value="${escapeHtml(loc.name)}">${escapeHtml(loc.displayName)}</option>`)
+    .join('');
+  ['dm-region', 'rg-location'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = options;
+  });
 }
 
 function updateSettingsBadge(status) {
@@ -738,10 +812,17 @@ document.getElementById('deleteCredsBtn').addEventListener('click', async () => 
   }
 });
 
+// "Refresh Regions" button in Settings tab — useful after changing subscription
+document.getElementById('refreshRegionsBtnSettings').addEventListener('click', () => {
+  _regionsCache = null; // bust client cache
+  loadRegions(true);    // bust server cache + repopulate all region dropdowns
+});
+
 // ── Deploy Modal ───────────────────────────────────────────────────────────
 
 function openDeployModal() {
   populateRgDropdown('dm-rg');
+  loadRegions(); // uses client cache if available; fetches from server only when needed
   document.getElementById('deployModal').classList.add('open');
 }
 
@@ -841,7 +922,19 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
     loadTrackedApps();
     loadLiveApps();
   } catch (err) {
-    showToast(err.message, 'error');
+    // If Azure rejected the deployment because of a region restriction or policy,
+    // automatically refresh the region list so the dropdown only shows valid regions.
+    const isRegionError = /location|region|not available|policy|GeoPairWith|availability zone/i.test(err.message || '');
+    if (isRegionError) {
+      _regionsCache = null; // bust client cache
+      await loadRegions(true); // force server cache bust + repopulate dropdowns
+      showToast(
+        `Region rejected by Azure — the dropdown has been refreshed with allowed regions. Please select another and try again. (${err.message})`,
+        'error'
+      );
+    } else {
+      showToast(err.message, 'error');
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = '🚀 Deploy';
