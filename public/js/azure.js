@@ -26,12 +26,15 @@ async function init() {
   updateStatusBar(status);
   updateSettingsBadge(status);
 
+  // Always show main content so the Settings tab is reachable
+  document.getElementById('mainContent').style.display = 'block';
+
   if (!azureConfigured) {
     document.getElementById('notConfiguredBanner').style.display = 'flex';
+    showTab('settings');
     return;
   }
 
-  document.getElementById('mainContent').style.display = 'block';
   loadOverview();
   populateAppSelectors();
 }
