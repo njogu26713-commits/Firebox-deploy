@@ -637,7 +637,13 @@ async function deployToAppService(options) {
       },
     });
 
-    await spawnStreaming('zip', ['-qr', zipPath, '.'], stageDir, log);
+    const { execSync: _execSync } = require('child_process');
+    let zipBin = '';
+    for (const cmd of ['which zip 2>/dev/null', 'command -v zip 2>/dev/null']) {
+      try { zipBin = _execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); if (zipBin) break; } catch {}
+    }
+    if (!zipBin) throw deploymentError('zip not found on this host — install the zip package (e.g. apt install zip)');
+    await spawnStreaming(zipBin, ['-qr', zipPath, '.'], stageDir, log);
     const { size } = await fs.stat(zipPath);
     log('info', `✓ ZIP created  (${(size / 1024).toFixed(1)} KB)`);
 
