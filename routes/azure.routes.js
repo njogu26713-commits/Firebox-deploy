@@ -81,6 +81,8 @@ router.get('/plans/:resourceGroup/:planName/instance-count', ctrl.getInstanceCou
 router.post('/plans/:resourceGroup/:planName/scale',         ctrl.scaleApp);
 
 // ── fireboxdeploy.toml auto-detect
-router.get('/toml-detect', ctrl.detectToml);
+router.get('/toml-detect',        ctrl.detectToml);
+// ── Groq AI start-command detection
+router.get('/ai-detect-start',    ctrl.aiDetectStartCommand);
 
 module.exports = router;

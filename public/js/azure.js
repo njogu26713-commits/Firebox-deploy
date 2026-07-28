@@ -1146,6 +1146,35 @@ document.getElementById('dm-repo').addEventListener('blur', async () => {
   } catch { /* ignore */ }
 });
 
+document.getElementById('aiDetectStartBtn').addEventListener('click', async () => {
+  const repoUrl = document.getElementById('dm-repo').value.trim();
+  const branch  = document.getElementById('dm-branch').value.trim() || 'main';
+  if (!repoUrl) { showToast('Enter a GitHub repo URL first', 'error'); return; }
+
+  const btn = document.getElementById('aiDetectStartBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Detecting…';
+
+  try {
+    const { startCommand, warnings } = await apiFetch(
+      `/api/azure/ai-detect-start?repo=${encodeURIComponent(repoUrl)}&branch=${encodeURIComponent(branch)}`
+    );
+    if (startCommand) {
+      document.getElementById('dm-start').value = startCommand;
+      showToast(`AI detected: ${startCommand}`, 'success');
+    } else {
+      showToast('AI could not determine the start command — set it manually', 'warn');
+    }
+    if (warnings?.length) console.warn('[AI detect]', warnings.join(' | '));
+  } catch (err) {
+    showToast('AI detection failed — check console for details', 'error');
+    console.error('[AI detect]', err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ AI Detect';
+  }
+});
+
 document.getElementById('confirmDeployBtn').addEventListener('click', async () => {
   const name    = document.getElementById('dm-name').value.trim();
   const rg      = document.getElementById('dm-rg').value;

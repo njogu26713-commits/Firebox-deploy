@@ -703,6 +703,18 @@ async function detectToml(req, res) {
   res.json({ config });
 }
 
+async function aiDetectStartCommand(req, res) {
+  const { repo, branch = 'main' } = req.query;
+  if (!repo) return res.status(400).json({ error: 'repo is required' });
+
+  const { detectStartCommandFromGitHub } = require('../services/groq-detect.service');
+  const warnings = [];
+  const log = (level, msg) => { if (level === 'warn') warnings.push(msg); };
+
+  const startCommand = await detectStartCommandFromGitHub(repo, branch, log);
+  res.json({ startCommand: startCommand || null, warnings });
+}
+
 // ── FireboxDeploy-tracked Azure Apps ──────────────────────────────────────
 
 async function listTrackedApps(req, res) {
@@ -766,6 +778,6 @@ module.exports = {
   listDomains, addDomain, removeDomain,
   scaleApp, getInstanceCount,
   getCost,
-  detectToml,
+  detectToml, aiDetectStartCommand,
   listTrackedApps, createTrackedApp, deleteTrackedApp,
 };
