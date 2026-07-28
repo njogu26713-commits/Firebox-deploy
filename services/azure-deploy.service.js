@@ -239,6 +239,20 @@ function spawnStreaming(cmd, args, cwd, log, extraEnv = {}) {
   });
 }
 
+// ── Ensure a package manager binary is available, installing it if needed ────
+
+async function ensurePackageManager(pm, log) {
+  if (pm === 'npm') return; // npm is always available with Node
+  const { execSync } = require('child_process');
+  try {
+    execSync(`which ${pm}`, { stdio: 'ignore' });
+  } catch {
+    log('info', `${pm} not found in PATH — installing via npm…`);
+    await spawnStreaming('npm', ['install', '-g', pm], process.cwd(), log);
+    log('info', `✓ ${pm} installed`);
+  }
+}
+
 // ── Directory tree (2 levels deep) ───────────────────────────────────────────
 
 async function listTree(dir, log, depth = 0, maxDepth = 2) {
@@ -482,6 +496,7 @@ async function deployToAppService(options) {
     // ── 3. Install ──────────────────────────────────────────────────────────
     currentStep = STEPS.INSTALL;
     log('info', '');
+    await ensurePackageManager(pm, log);
     log('info', `Running ${pm} install…`);
     const installArgs = pm === 'pnpm' ? ['install', '--frozen-lockfile']
                       : pm === 'yarn' ? ['install', '--frozen-lockfile']
