@@ -350,7 +350,12 @@ async function resolveStartCommand(deployPath, pkg, userStart, log) {
     }
   }
 
-  // ── 10. Give up ───────────────────────────────────────────────────────────
+  // ── 10. Groq AI fallback ─────────────────────────────────────────────────
+  const groqSvc = require('./groq-detect.service');
+  const aiCmd   = await groqSvc.detectStartCommand(deployPath, log);
+  if (aiCmd) return aiCmd;
+
+  // ── 11. Give up ───────────────────────────────────────────────────────────
   const allChecked = [...rootCandidates, ...distCandidates].join(', ');
   throw deploymentError(
     'Cannot determine startup command. ' +
