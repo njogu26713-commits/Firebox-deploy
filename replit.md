@@ -1,45 +1,44 @@
-# [Project name]
+# Firebox Deploy
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
-
-## Run & Operate
-
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+A self-hosted deployment platform for Node.js apps, APIs, websites, and bots — a private Railway/Vercel for the Firebox ecosystem.
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- **Backend:** Node.js + Express
+- **Database:** MongoDB (Mongoose) — hosted on MongoDB Atlas
+- **Realtime:** Socket.IO (live deployment logs)
+- **Auth:** Session-based (connect-mongo) + JWT
+- **Frontend:** Plain HTML/CSS/JS, no framework
 
-## Where things live
+## How to run
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+The app starts automatically via the **Start application** workflow (`node server.js`) on port 5000.
 
-## Architecture decisions
+To create/reset the admin account:
+```bash
+npm run seed:admin
+```
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+Then open `/login` and sign in with the email/password you set in `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
 
-## Product
+## Environment variables / secrets
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+| Key | Purpose |
+|-----|---------|
+| `MONGO_URI` | MongoDB Atlas connection string |
+| `SESSION_SECRET` | Express session signing key |
+| `JWT_SECRET` | JWT signing key |
+| `ADMIN_EMAIL` | Dashboard admin login email |
+| `ADMIN_PASSWORD` | Dashboard admin login password |
+| `PORT` | Server port (set to 5000) |
+| `NODE_ENV` | Environment (`production`) |
+| `GITHUB_WEBHOOK_SECRET` | Optional — for GitHub push webhook verification |
+
+## Important notes
+
+- **Docker + Nginx are required for actual deployments.** The dashboard UI runs fine on Replit, but the deploy pipeline (building Docker images, configuring Nginx, issuing SSL certs) needs a VPS with Docker and Nginx installed.
+- The platform is designed for a single admin owner — no multi-tenant isolation.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- Keep the existing project structure and stack — do not restructure or migrate.

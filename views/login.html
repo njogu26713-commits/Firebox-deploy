@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebox Deploy — Log in</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="auth-shell">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="brand-mark">🔥</div>
+        <div class="brand-name">Firebox<span>Deploy</span></div>
+      </div>
+      <h1 class="auth-title">Welcome back</h1>
+      <p class="auth-sub">Sign in to manage your apps, APIs and bots.</p>
+
+      <div class="auth-error" id="authError"></div>
+
+      <form id="loginForm">
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" placeholder="admin@firebox.local" required autofocus />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" placeholder="••••••••" required />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:11px;">
+          Sign in
+        </button>
+      </form>
+
+      <p class="text-muted mt-16" style="font-size:12px;">
+        No account yet? Run <code>npm run seed:admin</code> on the server to create one.
+      </p>
+    </div>
+  </div>
+
+  <script src="/js/login.js"></script>
+</body>
+</html>

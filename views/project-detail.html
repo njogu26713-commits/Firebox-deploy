@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebox — Project</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">🔥</div>
+      <div class="brand-name">Firebox<span>Deploy</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-item" onclick="location.href='/dashboard'"><span class="nav-icon">▢</span> Projects</div>
+      <div class="nav-item" onclick="location.href='/projects/new'"><span class="nav-icon">＋</span> New Project</div>
+      <div class="nav-item" onclick="location.href='/azure'"><span class="nav-icon">☁</span> Azure</div>
+      <div class="nav-item" onclick="location.href='/settings'"><span class="nav-icon">⚙</span> Settings</div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost btn-sm" onclick="location.href='/dashboard'" style="justify-content:center;">← Back</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1 id="projectName">Loading…</h1>
+        <div class="topbar-sub">
+          <span class="beacon" id="statusBeacon" data-status="idle"><span class="beacon-dot"></span>idle</span>
+          &nbsp;·&nbsp;
+          <a id="projectDomain" class="mono" href="#" target="_blank" rel="noopener"></a>
+        </div>
+      </div>
+      <div class="gap-8">
+        <button class="btn btn-sm btn-ghost" id="redeployBtn">↻ Redeploy</button>
+        <button class="btn btn-primary btn-sm" id="deployBtn">⚡ Deploy</button>
+        <button class="btn btn-danger btn-sm" id="deleteBtn">🗑 Delete</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <div class="stat-tiles">
+        <div class="stat-tile">
+          <div class="label">Status</div>
+          <div class="value" id="statStatus" style="font-size:16px;">—</div>
+        </div>
+        <div class="stat-tile">
+          <div class="label">Provider</div>
+          <div class="value" style="font-size:16px;">VPS / PM2</div>
+        </div>
+        <div class="stat-tile">
+          <div class="label">Branch</div>
+          <div class="value" id="statBranch" style="font-size:16px;">—</div>
+        </div>
+        <div class="stat-tile">
+          <div class="label">Last Deploy</div>
+          <div class="value" id="statDeployed" style="font-size:14px;">—</div>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active" data-tab="logs">Deploy Logs</div>
+        <div class="tab" data-tab="history">History</div>
+        <div class="tab" data-tab="env">Environment</div>
+        <div class="tab" data-tab="domains">Domains</div>
+        <div class="tab" data-tab="settings">Settings</div>
+      </div>
+
+      <!-- ── Logs ── -->
+      <div class="tab-panel active" id="panel-logs">
+        <div class="pipeline mt-8" id="pipeline">
+          <div class="pipe-step" data-step="connect">1 SSH Connect</div>
+          <div class="pipe-step" data-step="clone">2 Clone / Pull</div>
+          <div class="pipe-step" data-step="install">3 Install &amp; Build</div>
+          <div class="pipe-step" data-step="pm2">4 PM2 Start</div>
+        </div>
+        <div class="terminal mt-16" id="terminal">
+          <div class="line text-muted">Waiting for a deployment… click ⚡ Deploy to start.</div>
+        </div>
+        <div class="gap-8 mt-8">
+          <button class="btn btn-sm btn-ghost" id="fetchLogsBtn">↻ Fetch latest logs</button>
+        </div>
+      </div>
+
+      <!-- ── History ── -->
+      <div class="tab-panel" id="panel-history">
+        <table>
+          <thead><tr><th>Status</th><th>Triggered by</th><th>URL</th><th>Started</th></tr></thead>
+          <tbody id="historyBody"><tr><td colspan="4" class="text-muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <!-- ── Environment ── -->
+      <div class="tab-panel" id="panel-env">
+        <div id="envRows"></div>
+        <div class="gap-8 mt-16">
+          <button class="btn btn-sm btn-ghost" id="addEnvRow">+ Add variable</button>
+          <button class="btn btn-sm btn-primary" id="saveEnvBtn">Save variables</button>
+        </div>
+        <p class="field-hint mt-8">Variables are written to <code>.env</code> on your VPS at the next deployment.</p>
+      </div>
+
+      <!-- ── Domains ── -->
+      <div class="tab-panel" id="panel-domains">
+        <div id="domainsList" class="domains-list"></div>
+        <div class="field mt-16" style="max-width:420px;">
+          <label for="newDomain">Set app URL</label>
+          <div class="gap-8">
+            <input id="newDomain" placeholder="https://app.yourdomain.com" style="flex:1;" />
+            <button class="btn btn-sm btn-primary" id="addDomainBtn">Save</button>
+          </div>
+          <div class="field-hint">Enter the public URL your app is accessible at on this VPS.</div>
+        </div>
+      </div>
+
+      <!-- ── Settings ── -->
+      <div class="tab-panel" id="panel-settings">
+        <div class="row">
+          <div class="field"><label>Branch</label><input id="settingBranch" /></div>
+          <div class="field"><label>Root directory</label><input id="settingRootDir" /></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Build command</label><input id="settingBuild" placeholder="e.g. npm run build" /></div>
+          <div class="field"><label>Start command</label><input id="settingStart" placeholder="e.g. npm start" /></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Deploy path on VPS</label><input id="settingDeployPath" placeholder="auto-derived from SSH settings" /></div>
+          <div class="field"><label>PM2 process name</label><input id="settingPm2Name" placeholder="auto-derived from project slug" /></div>
+        </div>
+        <div class="gap-8 mt-8">
+          <button class="btn btn-primary btn-sm" id="saveSettingsBtn">Save Settings</button>
+        </div>
+        <div class="field mt-24" style="max-width:340px;">
+          <label style="color:var(--danger);">Danger zone</label>
+          <button class="btn btn-danger btn-sm" id="deleteBtn2">Delete project</button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/socket-client.js"></script>
+<script src="/js/project-detail.js"></script>
+</body>
+</html>

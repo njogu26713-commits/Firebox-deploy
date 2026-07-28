@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebox — Azure</title>
+<link rel="stylesheet" href="/css/style.css" />
+<link rel="stylesheet" href="/css/azure.css" />
+</head>
+<body>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">🔥</div>
+      <div class="brand-name">Firebox<span>Deploy</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-item" onclick="location.href='/dashboard'"><span class="nav-icon">▢</span> Projects</div>
+      <div class="nav-item" onclick="location.href='/projects/new'"><span class="nav-icon">＋</span> New Project</div>
+      <div class="nav-item active" onclick="location.href='/azure'"><span class="nav-icon">☁</span> Azure</div>
+      <div class="nav-item" onclick="location.href='/settings'"><span class="nav-icon">⚙</span> Settings</div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <span>👤</span>
+        <div>
+          <strong id="userName">—</strong>
+          <span id="userEmail">—</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="logoutBtn" style="justify-content:center;">Log out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>☁ Azure</h1>
+        <div class="topbar-sub" id="azureStatusBar">Checking connection…</div>
+      </div>
+      <div class="gap-8">
+        <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ Refresh</button>
+        <button class="btn btn-primary btn-sm" id="deployBtn">＋ Deploy App</button>
+      </div>
+    </div>
+
+    <!-- Not configured banner -->
+    <div id="notConfiguredBanner" class="azure-setup-banner" style="display:none;">
+      <div class="azure-setup-inner">
+        <div class="azure-setup-icon">☁</div>
+        <h2>Connect Azure</h2>
+        <p>Enter your Microsoft Azure Service Principal credentials to start deploying and managing applications from FireboxDeploy.</p>
+        <button class="btn btn-primary" onclick="showTab('settings')">Configure Azure →</button>
+      </div>
+    </div>
+
+    <!-- Main content (shown when configured) -->
+    <div id="mainContent" style="display:none;">
+
+      <!-- Connection status banner -->
+      <div id="connectionBanner" class="railway-banner" style="margin:18px 28px 0;display:none;">
+        <div class="railway-banner-icon" id="bannerIcon">☁</div>
+        <div class="railway-banner-body">
+          <div class="railway-banner-title" id="bannerTitle">Connected</div>
+          <div class="railway-banner-msg" id="bannerMsg">—</div>
+        </div>
+      </div>
+
+      <div class="content">
+        <!-- Tabs -->
+        <div class="tabs" id="azureTabs">
+          <div class="tab active" data-tab="overview">Overview</div>
+          <div class="tab" data-tab="apps">Applications</div>
+          <div class="tab" data-tab="resource-groups">Resource Groups</div>
+          <div class="tab" data-tab="monitoring">Monitoring</div>
+          <div class="tab" data-tab="logs">Logs</div>
+          <div class="tab" data-tab="domains">Domains</div>
+          <div class="tab" data-tab="env-vars">Env Vars</div>
+          <div class="tab" data-tab="cost">Cost</div>
+          <div class="tab" data-tab="settings">Settings</div>
+        </div>
+
+        <!-- ── Overview ─────────────────────────────────────── -->
+        <div class="tab-panel active" id="panel-overview">
+          <div class="stat-tiles" id="overviewTiles">
+            <div class="stat-tile"><div class="label">Subscription</div><div class="value" id="subName">—</div></div>
+            <div class="stat-tile"><div class="label">Region</div><div class="value" id="subRegion" style="font-size:14px;">—</div></div>
+            <div class="stat-tile"><div class="label">Resource Groups</div><div class="value" id="rgCount">—</div></div>
+            <div class="stat-tile"><div class="label">App Services</div><div class="value" id="appCount">—</div></div>
+            <div class="stat-tile"><div class="label">Virtual Machines</div><div class="value" id="vmCount">—</div></div>
+            <div class="stat-tile"><div class="label">Storage Accounts</div><div class="value" id="storageCount">—</div></div>
+            <div class="stat-tile"><div class="label">Est. Monthly Cost</div><div class="value" id="monthlyCost">—</div></div>
+            <div class="stat-tile"><div class="label">Azure Status</div><div class="value" id="azStatus" style="font-size:14px;">—</div></div>
+          </div>
+
+          <h3 style="margin-bottom:14px;">Your Azure Applications</h3>
+          <div id="trackedAppsGrid" class="grid"></div>
+          <div id="trackedAppsEmpty" class="empty" style="display:none;">
+            <h3>No Azure apps yet</h3>
+            <p>Deploy your first app to Azure App Service from a GitHub repository.</p>
+            <button class="btn btn-primary" id="deployFirstBtn">＋ Deploy App</button>
+          </div>
+        </div>
+
+        <!-- ── Applications ─────────────────────────────────── -->
+        <div class="tab-panel" id="panel-apps">
+          <div class="flex-between" style="margin-bottom:16px;">
+            <h3>App Services</h3>
+            <div class="gap-8">
+              <button class="btn btn-ghost btn-sm" onclick="loadLiveApps()">↻ Refresh</button>
+              <button class="btn btn-primary btn-sm" id="newAppBtn">＋ New App</button>
+            </div>
+          </div>
+          <div id="liveAppsTable">
+            <div class="empty"><p>Loading Azure apps…</p></div>
+          </div>
+        </div>
+
+        <!-- ── Resource Groups ──────────────────────────────── -->
+        <div class="tab-panel" id="panel-resource-groups">
+          <div class="flex-between" style="margin-bottom:16px;">
+            <h3>Resource Groups</h3>
+            <div class="gap-8">
+              <button class="btn btn-ghost btn-sm" onclick="loadResourceGroups()">↻ Refresh</button>
+              <button class="btn btn-primary btn-sm" id="newRgBtn">＋ New Group</button>
+            </div>
+          </div>
+          <div id="rgSearchWrap" style="margin-bottom:14px;">
+            <input id="rgSearch" placeholder="Search resource groups…" style="max-width:320px;" oninput="filterRgs()" />
+          </div>
+          <div class="card" style="padding:0;overflow:hidden;">
+            <table id="rgTable">
+              <thead><tr><th>Name</th><th>Location</th><th>State</th><th>Tags</th><th></th></tr></thead>
+              <tbody id="rgTableBody"><tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px;">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ── Monitoring ────────────────────────────────────── -->
+        <div class="tab-panel" id="panel-monitoring">
+          <div class="flex-between" style="margin-bottom:16px;">
+            <h3>Monitoring</h3>
+            <div class="gap-8">
+              <select id="monitorApp" style="width:220px;"><option value="">Select app…</option></select>
+              <select id="monitorRange">
+                <option value="1h">Last Hour</option>
+                <option value="24h" selected>Last 24 Hours</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" onclick="loadMetrics()">↻ Load</button>
+            </div>
+          </div>
+          <div id="metricsPanel">
+            <div class="empty"><p>Select an app and time range to view metrics.</p></div>
+          </div>
+        </div>
+
+        <!-- ── Logs ──────────────────────────────────────────── -->
+        <div class="tab-panel" id="panel-logs">
+          <!-- Sub-tabs -->
+          <div class="tabs" id="logSubTabs" style="margin-bottom:16px;">
+            <div class="tab active" data-subtab="activity">Activity Logs</div>
+            <div class="tab" data-subtab="deploy-history">Deploy History</div>
+          </div>
+
+          <!-- Activity Logs -->
+          <div id="subpanel-activity">
+            <div class="flex-between" style="margin-bottom:12px;">
+              <h3>Azure Activity Logs</h3>
+              <div class="gap-8">
+                <select id="logsApp" style="width:220px;"><option value="">Select app…</option></select>
+                <button class="btn btn-ghost btn-sm" onclick="loadLogs()">↻ Load</button>
+              </div>
+            </div>
+            <div class="terminal" id="logsTerminal"><span style="color:var(--muted-2);">Select an app to view logs.</span></div>
+          </div>
+
+          <!-- Deploy History -->
+          <div id="subpanel-deploy-history" style="display:none;">
+            <div class="flex-between" style="margin-bottom:12px;">
+              <h3>Deployment History</h3>
+              <div class="gap-8">
+                <select id="historyApp" style="width:220px;"><option value="">Select app…</option></select>
+                <button class="btn btn-ghost btn-sm" onclick="loadDeployHistory()">↻ Load</button>
+              </div>
+            </div>
+            <div id="deployHistoryPanel">
+              <div class="empty"><p>Select an app to view its deployment history.</p></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Domains ───────────────────────────────────────── -->
+        <div class="tab-panel" id="panel-domains">
+          <div class="flex-between" style="margin-bottom:16px;">
+            <h3>Custom Domains</h3>
+            <div class="gap-8">
+              <select id="domainsApp" style="width:220px;"><option value="">Select app…</option></select>
+              <button class="btn btn-ghost btn-sm" onclick="loadDomains()">↻ Load</button>
+            </div>
+          </div>
+          <div id="domainsPanel">
+            <div class="empty"><p>Select an app to manage its domains.</p></div>
+          </div>
+        </div>
+
+        <!-- ── Environment Variables ──────────────────────── -->
+        <div class="tab-panel" id="panel-env-vars">
+          <div class="flex-between" style="margin-bottom:16px;">
+            <h3>Environment Variables</h3>
+            <div class="gap-8">
+              <select id="envVarsApp" style="width:220px;"><option value="">Select app…</option></select>
+              <button class="btn btn-ghost btn-sm" onclick="loadEnvVars()">↻ Load</button>
+            </div>
+          </div>
+          <div id="envVarsPanel">
+            <div class="empty"><p>Select an app to view and edit its environment variables.</p></div>
+          </div>
+        </div>
+
+        <!-- ── Cost ──────────────────────────────────────────── -->
+        <div class="tab-panel" id="panel-cost">
+          <h3 style="margin-bottom:16px;">Cost Management</h3>
+          <div id="costPanel">
+            <div class="empty"><p>Loading cost data…</p></div>
+          </div>
+        </div>
+
+        <!-- ── Settings ──────────────────────────────────────── -->
+        <div class="tab-panel" id="panel-settings">
+          <div class="settings-card">
+            <div class="settings-card-head">
+              <div>
+                <div class="settings-card-title">Azure Service Principal</div>
+                <div class="settings-card-sub">Connect a Microsoft Azure account using a Service Principal (App Registration). FireboxDeploy uses these credentials to deploy and manage resources on your behalf.</div>
+              </div>
+              <div id="azureStatusBadge" class="token-badge">Unconfigured</div>
+            </div>
+
+            <div class="field">
+              <label>Azure Client ID (App ID)</label>
+              <input type="password" id="inputClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label>Azure Client Secret</label>
+              <input type="password" id="inputClientSecret" placeholder="Your client secret value" autocomplete="off" />
+            </div>
+            <div class="row">
+              <div class="field">
+                <label>Tenant ID (Directory ID)</label>
+                <input type="password" id="inputTenantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label>Subscription ID</label>
+                <input type="password" id="inputSubscriptionId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" />
+              </div>
+            </div>
+            <div class="gap-8">
+              <button class="btn btn-primary" id="saveCredsBtn">Save &amp; Connect</button>
+              <button class="btn btn-ghost btn-sm" id="testCredsBtn">Test Connection</button>
+              <button class="btn btn-ghost btn-sm" id="refreshRegionsBtnSettings" title="Re-fetch available regions for the connected subscription">↻ Refresh Regions</button>
+              <button class="btn btn-danger btn-sm" id="deleteCredsBtn">Disconnect</button>
+            </div>
+            <div id="credsResult" style="margin-top:14px;display:none;"></div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-title" style="margin-bottom:10px;">How to create a Service Principal</div>
+            <ol class="azure-help-list">
+              <li>In the <a href="https://portal.azure.com" target="_blank" rel="noopener">Azure Portal</a>, go to <strong>Azure Active Directory → App registrations → New registration</strong>.</li>
+              <li>Give it a name (e.g. <code>firebox-deploy</code>), then click <strong>Register</strong>.</li>
+              <li>Copy the <strong>Application (client) ID</strong> and <strong>Directory (tenant) ID</strong> from the overview.</li>
+              <li>Under <strong>Certificates &amp; secrets → New client secret</strong>, create a secret and copy its <strong>Value</strong>.</li>
+              <li>Go to your <strong>Subscription → Access control (IAM) → Add role assignment</strong> and assign the <strong>Contributor</strong> role to the app registration.</li>
+              <li>Copy your <strong>Subscription ID</strong> from the Subscription overview.</li>
+            </ol>
+          </div>
+        </div>
+
+      </div><!-- .content -->
+    </div><!-- #mainContent -->
+  </main>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<!-- ── Deploy Modal ──────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="deployModal">
+  <div class="modal" style="max-width:600px;">
+    <div class="flex-between" style="margin-bottom:18px;">
+      <h3 id="deployModalTitle">Deploy to Azure App Service</h3>
+      <button class="btn btn-ghost btn-sm btn-icon" id="deployModalClose" onclick="closeModal('deployModal');resetDeployModal();">✕</button>
+    </div>
+
+    <!-- Screen 1: Form inputs -->
+    <div id="dm-form">
+      <div class="field">
+        <label>App Name <span style="color:var(--muted)">(must be globally unique)</span></label>
+        <input id="dm-name" placeholder="my-app-firebox" />
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Resource Group</label>
+          <select id="dm-rg"><option value="">Loading…</option></select>
+        </div>
+        <div class="field">
+          <label>Region <button class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:11px;padding:2px 8px;vertical-align:middle;" onclick="loadRegions(true)" id="refreshRegionsBtn" title="Reload available regions from Azure">↻ Refresh</button></label>
+          <select id="dm-region"><option value="">Loading regions…</option></select>
+          <div id="regionsHint" class="field-hint" style="display:none;"></div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Runtime</label>
+          <select id="dm-runtime">
+            <option value="NODE|20-lts">Node.js 20 LTS</option>
+            <option value="NODE|18-lts">Node.js 18 LTS</option>
+            <option value="PYTHON|3.12">Python 3.12</option>
+            <option value="PYTHON|3.11">Python 3.11</option>
+            <option value="PHP|8.3">PHP 8.3</option>
+            <option value="PHP|8.2">PHP 8.2</option>
+            <option value="JAVA|17-java17">Java 17</option>
+            <option value="GO|1.21">Go 1.21</option>
+            <option value="DOTNETCORE|8.0">.NET 8</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Pricing Tier</label>
+          <select id="dm-sku">
+            <option value="F1">F1 — Free</option>
+            <option value="B1" selected>B1 — Basic (~$13/mo)</option>
+            <option value="B2">B2 — Basic (~$27/mo)</option>
+            <option value="B3">B3 — Basic (~$54/mo)</option>
+            <option value="P1v3">P1v3 — Premium (~$81/mo)</option>
+            <option value="P2v3">P2v3 — Premium (~$162/mo)</option>
+            <option value="S1">S1 — Standard (~$73/mo)</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>GitHub Repository URL</label>
+        <input id="dm-repo" placeholder="https://github.com/owner/repo" />
+      </div>
+      <div class="field">
+        <label>Branch</label>
+        <input id="dm-branch" value="main" />
+      </div>
+      <div class="field">
+        <label>Start Command <span style="color:var(--muted-2)">(optional — Azure auto-detects if blank)</span></label>
+        <input id="dm-start" placeholder="node server.js" />
+        <div class="field-hint">Azure clones your repo and runs <code>npm install</code> + build automatically via Oryx.</div>
+      </div>
+      <div class="gap-8" style="margin-top:8px;">
+        <button class="btn btn-primary" id="confirmDeployBtn">🚀 Deploy</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('deployModal')">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Screen 2: Live deployment log terminal -->
+    <div id="dm-log-screen" style="display:none;">
+      <!-- Step progress bar -->
+      <div id="dm-step-progress" style="margin-bottom:12px;"></div>
+
+      <!-- Live terminal -->
+      <div style="position:relative;">
+        <div style="display:flex;gap:8px;margin-bottom:6px;font-size:11px;color:var(--muted-2);">
+          <span>● stdout</span>
+          <span style="color:var(--danger-muted,#f87171);">● stderr</span>
+          <span style="color:var(--muted-2);">● info</span>
+        </div>
+        <div class="terminal" id="dm-terminal" style="height:320px;overflow-y:auto;"></div>
+        <div id="dm-terminal-spinner" style="position:absolute;bottom:12px;right:14px;font-size:12px;color:var(--muted-2);">
+          <span class="spinner" style="width:12px;height:12px;display:inline-block;border-width:2px;"></span> running…
+        </div>
+      </div>
+
+      <!-- Result banner -->
+      <div id="dm-result" style="margin-top:12px;display:none;"></div>
+
+      <!-- Post-deploy actions -->
+      <div id="dm-post-actions" class="gap-8" style="margin-top:12px;display:none;">
+        <button class="btn btn-ghost btn-sm" id="dm-view-logs-btn">📋 View Deployment Logs</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('deployModal');resetDeployModal();">Close</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Deployment Log Viewer Modal ───────────────────────────────────────── -->
+<div class="modal-overlay" id="deployLogModal">
+  <div class="modal" style="max-width:700px;">
+    <div class="flex-between" style="margin-bottom:14px;">
+      <div>
+        <h3 id="deployLogTitle">Deployment Log</h3>
+        <div id="deployLogMeta" style="font-size:12px;color:var(--muted);margin-top:3px;"></div>
+      </div>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('deployLogModal')">✕</button>
+    </div>
+    <!-- Failed step highlight -->
+    <div id="deployLogFailedStep" style="display:none;margin-bottom:12px;padding:10px 14px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;font-size:13px;"></div>
+    <!-- Stream filter -->
+    <div class="gap-8" style="margin-bottom:8px;">
+      <button class="btn btn-ghost btn-sm log-filter-btn active" data-filter="all" onclick="setLogFilter('all',this)">All</button>
+      <button class="btn btn-ghost btn-sm log-filter-btn" data-filter="stdout" onclick="setLogFilter('stdout',this)">stdout</button>
+      <button class="btn btn-ghost btn-sm log-filter-btn" data-filter="stderr" onclick="setLogFilter('stderr',this)">stderr</button>
+      <button class="btn btn-ghost btn-sm log-filter-btn" data-filter="error" onclick="setLogFilter('error',this)">errors</button>
+    </div>
+    <div class="terminal" id="deployLogTerminal" style="height:400px;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- ── New Resource Group Modal ──────────────────────────────────────────── -->
+<div class="modal-overlay" id="newRgModal">
+  <div class="modal">
+    <div class="flex-between" style="margin-bottom:18px;">
+      <h3>New Resource Group</h3>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('newRgModal')">✕</button>
+    </div>
+    <div class="field">
+      <label>Name</label>
+      <input id="rg-name" placeholder="my-resource-group" />
+    </div>
+    <div class="field">
+      <label>Location</label>
+      <select id="rg-location"><option value="">Loading regions…</option></select>
+    </div>
+    <div class="gap-8">
+      <button class="btn btn-primary" id="confirmNewRgBtn">Create</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('newRgModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── App Detail Modal ──────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="appDetailModal">
+  <div class="modal" style="max-width:540px;">
+    <div class="flex-between" style="margin-bottom:18px;">
+      <h3 id="appDetailTitle">App Details</h3>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('appDetailModal')">✕</button>
+    </div>
+    <div id="appDetailBody"></div>
+  </div>
+</div>
+
+<!-- ── Scale Modal ───────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="scaleModal">
+  <div class="modal" style="max-width:420px;">
+    <div class="flex-between" style="margin-bottom:18px;">
+      <h3>Scale App</h3>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('scaleModal')">✕</button>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:18px;">Adjust the number of instances for the App Service Plan. Scaling affects all apps sharing the same plan.</p>
+    <div class="field">
+      <label>App Service Plan</label>
+      <div id="scalePlanName" style="font-family:var(--font-mono);font-size:13px;padding:6px 0;color:var(--muted);">—</div>
+    </div>
+    <div class="field">
+      <label>Instance Count</label>
+      <div class="scale-slider-wrap">
+        <input type="range" id="scaleSlider" min="1" max="10" value="1" oninput="document.getElementById('scaleCountDisplay').textContent=this.value" />
+        <div class="scale-count-display" id="scaleCountDisplay">1</div>
+      </div>
+      <div class="field-hint">F1 (Free) tier does not support scaling beyond 1 instance.</div>
+    </div>
+    <div class="gap-8" style="margin-top:8px;">
+      <button class="btn btn-primary" id="confirmScaleBtn">Apply Scale</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('scaleModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add Domain Modal ──────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="addDomainModal">
+  <div class="modal">
+    <div class="flex-between" style="margin-bottom:18px;">
+      <h3>Add Custom Domain</h3>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="closeModal('addDomainModal')">✕</button>
+    </div>
+    <div class="field">
+      <label>Hostname</label>
+      <input id="domain-hostname" placeholder="app.example.com" />
+      <div class="field-hint">Add a CNAME or A record pointing to your Azure app before adding here.</div>
+    </div>
+    <div class="gap-8">
+      <button class="btn btn-primary" id="confirmAddDomainBtn">Add Domain</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('addDomainModal')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/socket-client.js"></script>
+<script src="/js/azure.js"></script>
+</body>
+</html>
