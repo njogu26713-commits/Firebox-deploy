@@ -241,16 +241,101 @@ function spawnStreaming(cmd, args, cwd, log, extraEnv = {}) {
 
 // ── Ensure a package manager binary is available, installing it if needed ────
 
+/**
+ * Ensure `pm` is executable, installing it if needed.
+ * Returns the absolute path to the binary so callers never rely on PATH.
+ * @param {'npm'|'yarn'|'pnpm'} pm
+ * @param {Function} log
+ * @returns {Promise<string>} resolved binary path
+ */
 async function ensurePackageManager(pm, log) {
-  if (pm === 'npm') return; // npm is always available with Node
   const { execSync } = require('child_process');
-  try {
-    execSync(`which ${pm}`, { stdio: 'ignore' });
-  } catch {
-    log('info', `${pm} not found in PATH — installing via npm…`);
-    await spawnStreaming('npm', ['install', '-g', pm], process.cwd(), log);
-    log('info', `✓ ${pm} installed`);
+
+  if (pm === 'npm') return 'npm'; // always on PATH with Node
+
+  /** Try to locate an already-installed binary; returns '' if not found. */
+  function resolveBin(name) {
+    for (const cmd of [
+      `which ${name} 2>/dev/null`,
+      `command -v ${name} 2>/dev/null`,
+    ]) {
+      try {
+        const out = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        if (out) return out;
+      } catch { /* try next */ }
+    }
+    // Fallback: npm global bin directory
+    try {
+      const npmBin = execSync('npm bin -g', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const candidate = path.join(npmBin, name);
+      execSync(`test -x ${candidate}`, { stdio: 'ignore' });
+      return candidate;
+    } catch {}
+    return '';
   }
+
+  /** Verify the binary actually executes; returns version string or throws. */
+  function verifyBin(binPath) {
+    return execSync(`${binPath} --version`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  }
+
+  // ── pnpm: prefer Corepack ─────────────────────────────────────────────────
+  if (pm === 'pnpm') {
+    // Check if pnpm is already present and working
+    const existing = resolveBin('pnpm');
+    if (existing) {
+      try {
+        const ver = verifyBin(existing);
+        log('info', `✓ pnpm executable: ${existing} (v${ver})`);
+        return existing;
+      } catch { /* not working — reinstall below */ }
+    }
+
+    // Try Corepack first (Node ≥ 16.9)
+    const hasCorepack = (() => { try { execSync('which corepack', { stdio: 'ignore' }); return true; } catch { return false; } })();
+    if (hasCorepack) {
+      log('info', 'Enabling pnpm via Corepack…');
+      await spawnStreaming('corepack', ['enable'], process.cwd(), log);
+      await spawnStreaming('corepack', ['prepare', 'pnpm@latest', '--activate'], process.cwd(), log);
+    } else {
+      log('info', 'pnpm not found in PATH — installing via npm…');
+      await spawnStreaming('npm', ['install', '-g', 'pnpm'], process.cwd(), log);
+    }
+
+    const resolved = resolveBin('pnpm');
+    if (!resolved) {
+      throw deploymentError(
+        'pnpm executable not found after installation — ' +
+        'ensure Node.js ≥16.9 is installed and Corepack is available on this host.'
+      );
+    }
+    let ver;
+    try { ver = verifyBin(resolved); } catch {
+      throw deploymentError(
+        `pnpm found at ${resolved} but failed to execute — check file permissions.`
+      );
+    }
+    log('info', `✓ pnpm executable: ${resolved} (v${ver})`);
+    return resolved;
+  }
+
+  // ── yarn (and any other future pm) ───────────────────────────────────────
+  const existing = resolveBin(pm);
+  if (existing) {
+    try { verifyBin(existing); return existing; } catch { /* reinstall */ }
+  }
+
+  log('info', `${pm} not found in PATH — installing via npm…`);
+  await spawnStreaming('npm', ['install', '-g', pm], process.cwd(), log);
+
+  const resolved = resolveBin(pm);
+  if (resolved) {
+    log('info', `✓ ${pm} installed: ${resolved}`);
+    return resolved;
+  }
+  // Best-effort: return the name and let the OS try
+  log('warn', `Could not resolve absolute path for ${pm} after install — using bare name`);
+  return pm;
 }
 
 // ── Directory tree (2 levels deep) ───────────────────────────────────────────
@@ -518,12 +603,12 @@ async function deployToAppService(options) {
     // ── 3. Install ──────────────────────────────────────────────────────────
     currentStep = STEPS.INSTALL;
     log('info', '');
-    await ensurePackageManager(pm, log);
+    const pmBin = await ensurePackageManager(pm, log);
     log('info', `Running ${pm} install…`);
     const installArgs = pm === 'pnpm' ? ['install', '--frozen-lockfile']
                       : pm === 'yarn' ? ['install', '--frozen-lockfile']
                       : ['install'];
-    await spawnStreaming(pm, installArgs, deployPath, log);
+    await spawnStreaming(pmBin, installArgs, deployPath, log);
     log('info', '✓ Dependencies installed');
 
     // ── 4. Build ────────────────────────────────────────────────────────────
@@ -531,7 +616,7 @@ async function deployToAppService(options) {
     if (pkg.scripts?.build) {
       log('info', '');
       log('info', `Running build: ${pkg.scripts.build}`);
-      await spawnStreaming(pm, ['run', 'build'], deployPath, log);
+      await spawnStreaming(pmBin, ['run', 'build'], deployPath, log);
       log('info', '✓ Build complete');
     } else {
       log('info', 'No build script — skipping');
