@@ -55,6 +55,9 @@ router.post('/apps/:resourceGroup/:name/deploy', ctrl.deployFromGitHub);
 // ── Deployment streaming via SSE (used by the dashboard UI)
 router.post('/apps/:resourceGroup/:name/deploy-stream', ctrl.streamDeploy);
 
+// ── Provision + deploy in one pipeline (creates App Service if needed, then deploys)
+router.post('/apps/:resourceGroup/:name/provision-deploy-stream', ctrl.streamProvisionAndDeploy);
+
 router.post('/apps/:resourceGroup/:name/sync',   ctrl.syncDeployment);
 router.get('/apps/:resourceGroup/:name/deployments', ctrl.listDeployments);
 

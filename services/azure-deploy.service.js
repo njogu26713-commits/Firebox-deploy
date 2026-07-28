@@ -36,6 +36,7 @@ const APP_STARTUP_TIMEOUT_MS =  3 * 60_000;
 
 // ── Pipeline step names (must match PIPELINE_STEPS in public/js/azure.js) ───
 const STEPS = {
+  PROVISION:   'Provision App Service',
   CLONE:       'Clone Repository',
   INSPECT:     'Inspect Repository',
   INSTALL:     'Install Dependencies',
@@ -92,6 +93,83 @@ function parseDeploymentStatus(d) {
 function extractDeploymentId(location, data) {
   const m = String(location || '').match(/\/deployments\/([^/?#]+)/i);
   return m?.[1] || data?.id || data?.deploymentId || null;
+}
+
+// ── Provisioning tunables ─────────────────────────────────────────────────────
+const CRED_MAX_ATTEMPTS  = 6;
+const CRED_RETRY_MS      = 5_000;
+
+// ── Provision App Service (resource group → plan → app) ──────────────────────
+
+/**
+ * Creates the Azure resource group, App Service Plan, and App Service if they
+ * do not already exist. Idempotent — each step is skipped when the resource
+ * is already present.
+ *
+ * @param {object}   opts
+ * @param {string}   opts.resourceGroup
+ * @param {string}   opts.name           – App Service name
+ * @param {string}   [opts.location]     – Azure region (default: eastus)
+ * @param {string}   [opts.planName]     – Plan name (default: <name>-plan)
+ * @param {string}   [opts.planSku]      – Plan SKU (default: B1)
+ * @param {string}   [opts.runtimeStack] – linuxFxVersion (default: NODE|18-lts)
+ * @param {Function} log                 – (level, msg) => void
+ * @returns {{ planId: string, planName: string }}
+ */
+async function provisionAppService(opts, log) {
+  const {
+    resourceGroup,
+    name,
+    location     = 'eastus',
+    planName: requestedPlan = '',
+    planSku      = 'B1',
+    runtimeStack = 'NODE|18-lts',
+  } = opts;
+
+  const resolvedPlanName = requestedPlan || `${name}-plan`;
+
+  // ── Resource Group ──────────────────────────────────────────────────────────
+  const rgs = await azure.listResourceGroups();
+  if (rgs.some((rg) => rg.name === resourceGroup)) {
+    log('info', `✓ Resource group "${resourceGroup}" already exists`);
+  } else {
+    log('info', `Creating resource group "${resourceGroup}" in ${location}…`);
+    await azure.createResourceGroup(resourceGroup, location);
+    log('info', `✓ Resource group "${resourceGroup}" created`);
+  }
+
+  // ── App Service Plan ────────────────────────────────────────────────────────
+  const plans = await azure.listAppServicePlans();
+  let planId;
+  const existingPlan = plans.find((p) => p.name === resolvedPlanName);
+  if (existingPlan) {
+    planId = existingPlan.id;
+    log('info', `✓ App Service Plan "${resolvedPlanName}" already exists`);
+  } else {
+    log('info', `Creating App Service Plan "${resolvedPlanName}" (${planSku}, Linux)…`);
+    const plan = await azure.createAppServicePlan(resourceGroup, resolvedPlanName, location, planSku, true);
+    planId = plan.id;
+    log('info', `✓ App Service Plan "${resolvedPlanName}" created`);
+  }
+
+  // ── App Service ─────────────────────────────────────────────────────────────
+  let appExists = false;
+  try {
+    await azure.getApp(resourceGroup, name);
+    appExists = true;
+  } catch (e) {
+    if (e.azureStatus !== 404) throw e;
+  }
+
+  if (appExists) {
+    log('info', `✓ App Service "${name}" already exists`);
+  } else {
+    log('info', `Creating App Service "${name}" (${runtimeStack})…`);
+    await azure.createApp(resourceGroup, name, location, planId, runtimeStack);
+    log('info', `✓ App Service "${name}" created`);
+  }
+
+  return { planId, planName: resolvedPlanName };
 }
 
 // ── Kudu HTTP ─────────────────────────────────────────────────────────────────
@@ -256,6 +334,11 @@ async function getKuduAppLogs(profile) {
  * @param {string}   [options.branch]
  * @param {string}   [options.githubToken]
  * @param {string}   [options.startCommand]
+ * @param {boolean}  [options.provision]      – when true, create RG/plan/app before deploying
+ * @param {string}   [options.location]       – Azure region (used when provision=true)
+ * @param {string}   [options.planName]       – plan name override (used when provision=true)
+ * @param {string}   [options.planSku]        – plan SKU (used when provision=true, default B1)
+ * @param {string}   [options.runtimeStack]   – linuxFxVersion (used when provision=true)
  * @param {Function} [options.log]   (level, message, stream, step) => void
  */
 async function deployToAppService(options) {
@@ -266,6 +349,11 @@ async function deployToAppService(options) {
     branch       = 'main',
     githubToken  = '',
     startCommand = '',
+    provision    = false,
+    location     = 'eastus',
+    planName     = '',
+    planSku      = 'B1',
+    runtimeStack = 'NODE|18-lts',
     log: onLog   = () => {},
   } = options;
 
@@ -285,6 +373,14 @@ async function deployToAppService(options) {
 
     const repoDir = path.join(tempDir, 'repo');
     const zipPath = path.join(tempDir, 'deploy.zip');
+
+    // ── 0. Provision (optional) ─────────────────────────────────────────────
+    if (provision) {
+      currentStep = STEPS.PROVISION;
+      log('info', `Provisioning Azure App Service "${name}"…`);
+      await provisionAppService({ resourceGroup, name, location, planName, planSku, runtimeStack }, log);
+      log('info', '✓ App Service provisioned');
+    }
 
     // ── 1. Clone ────────────────────────────────────────────────────────────
     currentStep = STEPS.CLONE;
@@ -380,11 +476,30 @@ async function deployToAppService(options) {
     const { size } = await fs.stat(zipPath);
     log('info', `✓ ZIP created  (${(size / 1024).toFixed(1)} KB)`);
 
-    // ── 6. Get Publishing Credentials ───────────────────────────────────────
+    // ── 6. Get Publishing Credentials (with retry — Azure takes time after creation) ──
     currentStep = STEPS.CREDENTIALS;
     log('info', '');
     log('info', 'Fetching Azure publishing credentials…');
-    const profile = parsePublishProfile(await azure.getPublishingProfile(resourceGroup, name));
+    if (provision) log('info', 'Azure may take up to 30 seconds.');
+
+    let profile;
+    for (let attempt = 1; attempt <= CRED_MAX_ATTEMPTS; attempt++) {
+      log('info', `Attempt ${attempt}/${CRED_MAX_ATTEMPTS}…`);
+      try {
+        profile = parsePublishProfile(await azure.getPublishingProfile(resourceGroup, name));
+        log('info', '✓ Publishing profile is now available.');
+        break;
+      } catch (credErr) {
+        if (attempt === CRED_MAX_ATTEMPTS) throw credErr;
+        const is404 = credErr.azureStatus === 404 || /404|not found|not ready/i.test(credErr.message);
+        if (is404) {
+          log('info', `Publishing profile not ready yet (404). Waiting ${CRED_RETRY_MS / 1000} seconds...`);
+        } else {
+          log('warn', `${credErr.message} — retrying in ${CRED_RETRY_MS / 1000}s…`);
+        }
+        await new Promise((r) => setTimeout(r, CRED_RETRY_MS));
+      }
+    }
     log('info', `✓ Kudu endpoint: ${profile.publishUrl}`);
 
     // Configure Azure app settings

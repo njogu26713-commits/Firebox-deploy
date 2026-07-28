@@ -434,6 +434,165 @@ async function streamDeploy(req, res) {
   res.end();
 }
 
+// ── Provision + Stream Deploy (SSE) ───────────────────────────────────────
+
+/**
+ * POST /api/azure/apps/:resourceGroup/:name/provision-deploy-stream
+ *
+ * Creates the App Service (resource group, plan, app) if it does not exist,
+ * then immediately deploys to it — all in one SSE-streamed pipeline.
+ *
+ * Body:
+ *   repoUrl, branch, rootDir, buildCommand, startCommand,
+ *   location, planName, planSku, runtimeStack
+ */
+async function streamProvisionAndDeploy(req, res) {
+  const { resourceGroup, name } = req.params;
+  const {
+    repoUrl,
+    branch       = 'main',
+    rootDir      = '.',
+    buildCommand = '',
+    startCommand = '',
+    location     = 'eastus',
+    planName     = '',
+    planSku      = 'B1',
+    runtimeStack = 'NODE|18-lts',
+  } = req.body;
+
+  if (!repoUrl) {
+    return res.status(400).json({ error: 'repoUrl is required' });
+  }
+
+  // SSE headers
+  res.writeHead(200, {
+    'Content-Type':      'text/event-stream',
+    'Cache-Control':     'no-cache',
+    'Connection':        'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const send = (event, data) => {
+    try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* disconnected */ }
+  };
+
+  const userId     = req.session.userId || req.userId;
+  const user       = await User.findById(userId).select('githubToken').catch(() => null);
+  const githubToken = user?.githubToken ? cryptoSvc.decrypt(user.githubToken) : '';
+
+  // Upsert local tracked-app record
+  let trackedApp = await AzureApp.findOne({ resourceGroup, name }).catch(() => null);
+  if (!trackedApp) {
+    trackedApp = await AzureApp.create({
+      name, resourceGroup,
+      region:      location,
+      planName,
+      planSku,
+      runtime:     runtimeStack.split('|')[0].toLowerCase(),
+      repoUrl,
+      branch,
+      rootDir,
+      buildCommand,
+      startCommand,
+      status: 'deploying',
+      owner:  userId,
+    }).catch(() => null);
+  } else {
+    trackedApp.status    = 'deploying';
+    trackedApp.lastError = '';
+    await trackedApp.save().catch(() => {});
+  }
+
+  // Create deployment record
+  const deployRecord = await AzureDeployment.create({
+    appName: name,
+    resourceGroup,
+    azureApp:  trackedApp?._id || null,
+    owner:     userId,
+    repoUrl,
+    branch,
+    status:    'running',
+    startedAt: new Date(),
+  }).catch(() => null);
+
+  const logs    = [];
+  let lastStep  = '';
+
+  try {
+    const result = await azureDeploy.deployToAppService({
+      resourceGroup,
+      name,
+      repoUrl,
+      branch,
+      githubToken,
+      rootDir,
+      buildCommand,
+      startCommand,
+      provision:   true,
+      location,
+      planName,
+      planSku,
+      runtimeStack,
+      log: (level, message, stream, step) => {
+        if (step && step !== lastStep) {
+          lastStep = step;
+          send('step', { step });
+        }
+        const entry = { level, message, ts: new Date(), stream: stream || 'info', step: step || '' };
+        logs.push(entry);
+        send('log', entry);
+      },
+    });
+
+    if (deployRecord) {
+      deployRecord.status       = 'success';
+      deployRecord.completedAt  = new Date();
+      deployRecord.deploymentId = result.deploymentId || '';
+      deployRecord.url          = result.url || '';
+      deployRecord.logs         = logs;
+      await deployRecord.save().catch(() => {});
+    }
+
+    if (trackedApp) {
+      trackedApp.status         = 'running';
+      trackedApp.lastError      = '';
+      trackedApp.lastDeployedAt = new Date();
+      if (result.url) trackedApp.azureUrl = result.url.replace('https://', '');
+      await trackedApp.save().catch(() => {});
+    }
+
+    send('success', {
+      deploymentId:      result.deploymentId,
+      url:               result.url,
+      azureDeploymentId: deployRecord?._id,
+    });
+  } catch (err) {
+    if (deployRecord) {
+      deployRecord.status       = 'failed';
+      deployRecord.completedAt  = new Date();
+      deployRecord.failedStep   = err.failedStep || lastStep || '';
+      deployRecord.errorMessage = err.message;
+      deployRecord.deploymentId = err.deploymentId || '';
+      deployRecord.logs         = err.logs || logs;
+      await deployRecord.save().catch(() => {});
+    }
+
+    if (trackedApp) {
+      trackedApp.status    = 'failed';
+      trackedApp.lastError = err.message;
+      await trackedApp.save().catch(() => {});
+    }
+
+    send('error', {
+      message:           err.message,
+      failedStep:        err.failedStep || lastStep || '',
+      azureDeploymentId: deployRecord?._id,
+    });
+  }
+
+  res.end();
+}
+
 // ── Deployment History ─────────────────────────────────────────────────────
 
 async function listAzureDeployments(req, res) {
@@ -600,7 +759,7 @@ module.exports = {
   listPlans, createPlan,
   listApps, getApp, createApp, deleteApp, startApp, stopApp, restartApp,
   getEnvVars, updateEnvVars,
-  deployFromGitHub, streamDeploy, syncDeployment, listDeployments,
+  deployFromGitHub, streamDeploy, streamProvisionAndDeploy, syncDeployment, listDeployments,
   listAzureDeployments, getAzureDeploymentLog,
   getMetrics,
   getLogs,
