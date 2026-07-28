@@ -13,7 +13,7 @@ assert.deepStrictEqual(
   getPackageManagerCommands('pnpm', { hasBuildScript: true }),
   {
     packageManager: 'pnpm',
-    setupCommand: 'command -v corepack >/dev/null 2>&1 || npm install --global corepack; corepack enable',
+    setupCommand: 'command -v corepack >/dev/null 2>&1 || npm install --global corepack; corepack enable; corepack prepare pnpm@latest --activate',
     installCommand: 'pnpm install',
     buildCommand: 'pnpm run build',
     startCommand: 'pnpm start',

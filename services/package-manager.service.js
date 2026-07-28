@@ -8,7 +8,7 @@ const PACKAGE_MANAGERS = {
     install: 'pnpm install',
     build: 'pnpm run build',
     start: 'pnpm start',
-    setup: 'command -v corepack >/dev/null 2>&1 || npm install --global corepack; corepack enable',
+    setup: 'command -v corepack >/dev/null 2>&1 || npm install --global corepack; corepack enable; corepack prepare pnpm@latest --activate',
   },
   yarn: {
     install: 'yarn install',

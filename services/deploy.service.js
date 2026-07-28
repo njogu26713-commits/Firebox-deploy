@@ -181,6 +181,51 @@ async function runDeployPipeline(project, deployment) {
         (line) => log('warn', line),
       );
       if (corepackCode !== 0) throw new Error('Could not enable Corepack for pnpm');
+
+      // ── Resolve and verify pnpm binary ──────────────────────────────────
+      // PATH may not be refreshed inside the current SSH session after
+      // `corepack enable`, so we resolve the absolute path explicitly before
+      // spawning pnpm.
+      log('info', 'Verifying pnpm executable path…');
+      let resolvedPnpm = '';
+
+      const { stdout: whichOut, code: whichCode } = await sshSvc.exec(
+        conn,
+        'which pnpm 2>/dev/null || command -v pnpm 2>/dev/null',
+      );
+      if (whichCode === 0 && whichOut.trim()) {
+        resolvedPnpm = whichOut.trim();
+      } else {
+        // Fallback: look in npm's global bin directory
+        const { stdout: npmBinOut } = await sshSvc.exec(conn, 'npm bin -g 2>/dev/null');
+        const candidate = `${npmBinOut.trim()}/pnpm`;
+        const { code: testCode } = await sshSvc.exec(conn, `test -x ${candidate}`);
+        if (testCode === 0) resolvedPnpm = candidate;
+      }
+
+      if (!resolvedPnpm) {
+        throw new Error(
+          'pnpm executable not found after Corepack setup — ' +
+          'ensure Node.js ≥16.9 is installed and Corepack is available on the remote host.',
+        );
+      }
+
+      const { stdout: verOut, code: verCode } = await sshSvc.exec(
+        conn, `${resolvedPnpm} --version`,
+      );
+      if (verCode !== 0) {
+        throw new Error(
+          `pnpm found at ${resolvedPnpm} but failed to execute — ` +
+          'ensure the binary is not corrupted and has executable permissions.',
+        );
+      }
+      log('info', `✓ pnpm executable: ${resolvedPnpm} (v${verOut.trim()})`);
+
+      // Patch all downstream commands to use the absolute path so they are
+      // immune to PATH differences across SSH exec channels.
+      commands.installCommand = commands.installCommand.replace(/^pnpm\b/, resolvedPnpm);
+      commands.buildCommand   = commands.buildCommand.replace(/^pnpm\b/, resolvedPnpm);
+      commands.startCommand   = commands.startCommand.replace(/^pnpm\b/, resolvedPnpm);
     }
 
     const { code: installCode } = await sshSvc.exec(
