@@ -1,117 +1,91 @@
 /**
- * Azure App Service deployment pipeline.
+ * Azure App Service deployment pipeline with full streaming output.
  *
- * Sends the repository URL directly to Azure Kudu's external-git deploy
- * endpoint (/deploy). Azure clones the repo, runs Oryx build, and deploys
- * the app entirely on Azure's infrastructure. Firebox streams the Kudu
- * build logs back to the browser in real time.
+ * Every command (git clone, npm install, build, zip) is spawned so its
+ * stdout/stderr flow to the browser terminal in real time.  After the
+ * clone the directory tree is listed so the user can see exactly what
+ * was checked out before anything else runs.
  *
- * Pipeline steps:
- *   1. Get Publishing Credentials  — fetch Kudu URL + basic-auth credentials
- *   2. Configure App Settings      — set startup command + build env vars
- *   3. Trigger Deployment          — POST repo URL to Kudu /deploy
- *   4. Building on Azure           — stream Kudu log lines while Azure builds
- *   5. Verify Application          — poll app URL until it responds
+ * Pipeline:
+ *  1. Clone Repository        – git clone --progress (streams git output)
+ *  2. Inspect Repository      – list files, read package.json
+ *  3. Install Dependencies    – npm/yarn/pnpm install (streamed)
+ *  4. Build                   – run build script if present (streamed)
+ *  5. Create Package          – zip the staged directory
+ *  6. Get Publishing Credentials – fetch Kudu basic-auth from Azure
+ *  7. Upload to Azure         – POST zip to Kudu zipdeploy
+ *  8. Deployment Status       – poll + stream Kudu build logs
+ *  9. Verify Application      – poll app URL until it responds
  */
 
-const axios  = require('axios');
-const azure  = require('./azure.service');
+'use strict';
 
-const POLL_INTERVAL_MS        = 3_000;
-const LOG_POLL_INTERVAL_MS    = 2_000;
-const DEFAULT_TIMEOUT_MS      = 15 * 60 * 1_000;   // 15 min build timeout
-const APP_STARTUP_TIMEOUT_MS  = 3  * 60 * 1_000;   // 3 min startup timeout
+const fs      = require('fs/promises');
+const path    = require('path');
+const os      = require('os');
+const { spawn } = require('child_process');
+const axios   = require('axios');
 
-// ── Named pipeline steps (must match PIPELINE_STEPS in azure.js) ────────────
+const azure = require('./azure.service');
+
+// ── Tunables ─────────────────────────────────────────────────────────────────
+const POLL_INTERVAL_MS       = 3_000;
+const LOG_POLL_INTERVAL_MS   = 2_000;
+const DEFAULT_TIMEOUT_MS     = 15 * 60_000;
+const APP_STARTUP_TIMEOUT_MS =  3 * 60_000;
+
+// ── Pipeline step names (must match PIPELINE_STEPS in public/js/azure.js) ───
 const STEPS = {
+  CLONE:       'Clone Repository',
+  INSPECT:     'Inspect Repository',
+  INSTALL:     'Install Dependencies',
+  BUILD:       'Build',
+  PACKAGE:     'Create Package',
   CREDENTIALS: 'Get Publishing Credentials',
-  CONFIGURE:   'Configure App Settings',
-  TRIGGER:     'Trigger Deployment',
-  BUILD:       'Building on Azure',
+  UPLOAD:      'Upload to Azure',
+  POLL:        'Deployment Status',
   STARTUP:     'Verify Application',
 };
 
-// ── XML helpers ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function decodeXml(value) {
-  return String(value)
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+function deploymentError(message, details = {}) {
+  const err = new Error(message);
+  Object.assign(err, details);
+  return err;
+}
+
+function responseBody(r) {
+  if (r == null) return '';
+  if (typeof r === 'string') return r;
+  try { return JSON.stringify(r, null, 2); } catch { return String(r); }
+}
+
+function decodeXml(v) {
+  return String(v)
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 }
 
 function parsePublishProfile(xml) {
   const profiles = [...String(xml || '').matchAll(/<publishProfile\b([^>]*)\/?>/gi)];
   const attrs = {};
-  for (const [, rawAttrs] of profiles) {
-    for (const match of rawAttrs.matchAll(/([\w-]+)="([^"]*)"/g)) {
-      attrs[match[1]] = decodeXml(match[2]);
-    }
+  for (const [, raw] of profiles) {
+    for (const m of raw.matchAll(/([\w-]+)="([^"]*)"/g)) attrs[m[1]] = decodeXml(m[2]);
     if (attrs.publishMethod === 'MSDeploy' || attrs.publishUrl) break;
   }
-
-  if (!attrs.publishUrl || !attrs.userName || !attrs.userPWD) {
-    throw deploymentError('Azure publishing profile did not contain Kudu deployment credentials');
-  }
-
-  const publishUrl = attrs.publishUrl.startsWith('http')
-    ? attrs.publishUrl
-    : `https://${attrs.publishUrl}`;
-  return {
-    publishUrl: publishUrl.replace(/\/+$/, ''),
-    userName:   attrs.userName,
-    password:   attrs.userPWD,
-  };
+  if (!attrs.publishUrl || !attrs.userName || !attrs.userPWD)
+    throw deploymentError('Azure publishing profile did not contain Kudu credentials');
+  const base = attrs.publishUrl.startsWith('http') ? attrs.publishUrl : `https://${attrs.publishUrl}`;
+  return { publishUrl: base.replace(/\/+$/, ''), userName: attrs.userName, password: attrs.userPWD };
 }
 
-// ── Error helpers ─────────────────────────────────────────────────────────────
-
-function deploymentError(message, details = {}) {
-  const error = new Error(message);
-  Object.assign(error, details);
-  return error;
-}
-
-function responseBody(response) {
-  if (response == null) return '';
-  if (typeof response === 'string') return response;
-  try { return JSON.stringify(response, null, 2); } catch { return String(response); }
-}
-
-// ── Kudu HTTP helper ──────────────────────────────────────────────────────────
-
-async function kuduRequest(profile, method, requestPath, options = {}) {
-  const url = `${profile.publishUrl}${requestPath}`;
-  try {
-    return await axios({
-      method,
-      url,
-      auth:             { username: profile.userName, password: profile.password },
-      timeout:          options.timeout || 30_000,
-      responseType:     options.responseType || 'json',
-      headers:          options.headers,
-      data:             options.data,
-      validateStatus:   () => true,
-    });
-  } catch (err) {
-    throw deploymentError(`Kudu request failed (${method} ${requestPath}): ${err.message}`, { cause: err });
-  }
-}
-
-// ── Deployment status helpers ─────────────────────────────────────────────────
-
-function parseDeploymentStatus(deployment) {
-  const raw = deployment?.status;
-  if (typeof raw === 'number') {
-    if (raw === 4) return 'success';
-    if (raw === 3) return 'failed';
-    return 'pending';
-  }
-  const s = String(raw || deployment?.status_text || '').toLowerCase();
-  if (['success', 'successful', 'succeeded', 'done', 'complete', 'completed'].includes(s)) return 'success';
-  if (['failed', 'failure', 'error', 'rejected'].includes(s)) return 'failed';
+function parseDeploymentStatus(d) {
+  const raw = d?.status;
+  if (typeof raw === 'number') return raw === 4 ? 'success' : raw === 3 ? 'failed' : 'pending';
+  const s = String(raw || d?.status_text || '').toLowerCase();
+  if (['success','successful','succeeded','done','complete','completed'].includes(s)) return 'success';
+  if (['failed','failure','error','rejected'].includes(s)) return 'failed';
   return 'pending';
 }
 
@@ -120,62 +94,131 @@ function extractDeploymentId(location, data) {
   return m?.[1] || data?.id || data?.deploymentId || null;
 }
 
-// ── Log streaming helper ──────────────────────────────────────────────────────
+// ── Kudu HTTP ─────────────────────────────────────────────────────────────────
 
-/**
- * Polls the Kudu deployment log endpoint and emits new lines via the log
- * callback until the deployment reaches a terminal state.
- *
- * Returns the final deployment object.
- */
-async function streamKuduBuildLogs(profile, deploymentId, log, deadline) {
-  const seenMessages = new Set();
+async function kuduRequest(profile, method, reqPath, opts = {}) {
+  try {
+    return await axios({
+      method, url: `${profile.publishUrl}${reqPath}`,
+      auth: { username: profile.userName, password: profile.password },
+      timeout: opts.timeout || 30_000,
+      responseType: opts.responseType || 'json',
+      headers: opts.headers, data: opts.data,
+      maxContentLength: opts.maxContentLength,
+      maxBodyLength: opts.maxBodyLength,
+      validateStatus: () => true,
+    });
+  } catch (e) {
+    throw deploymentError(`Kudu ${method} ${reqPath}: ${e.message}`, { cause: e });
+  }
+}
+
+// ── Spawn a command and stream every line through the log callback ────────────
+
+function spawnStreaming(cmd, args, cwd, log, extraEnv = {}) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(cmd, args, {
+      cwd,
+      env: { ...process.env, CI: '1', FORCE_COLOR: '0', ...extraEnv },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdoutBuf = '';
+    let stderrBuf = '';
+    let combined  = '';
+
+    const emit = (stream, chunk) => {
+      const text = stream === 'stdout' ? (stdoutBuf += chunk) : (stderrBuf += chunk);
+      void text;
+      // Flush complete lines
+      const lines = (stream === 'stdout' ? stdoutBuf : stderrBuf).split('\n');
+      if (stream === 'stdout') stdoutBuf = lines.pop();
+      else                     stderrBuf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        combined += line + '\n';
+        log('info', line, stream);
+      }
+    };
+
+    proc.stdout.on('data', (d) => emit('stdout', d.toString()));
+    proc.stderr.on('data', (d) => emit('stderr', d.toString()));
+
+    proc.on('close', (code) => {
+      // Flush remaining partial lines
+      if (stdoutBuf.trim()) { combined += stdoutBuf; log('info', stdoutBuf, 'stdout'); }
+      if (stderrBuf.trim()) { combined += stderrBuf; log('info', stderrBuf, 'stderr'); }
+
+      if (code === 0) return resolve(combined);
+      const err = deploymentError(
+        `${cmd} ${args.slice(0, 3).join(' ')} exited with code ${code}`,
+        { commandOutput: combined.slice(-4000) }
+      );
+      reject(err);
+    });
+
+    proc.on('error', (e) => reject(deploymentError(`Failed to start ${cmd}: ${e.message}`, { cause: e })));
+  });
+}
+
+// ── Directory tree (2 levels deep) ───────────────────────────────────────────
+
+async function listTree(dir, log, depth = 0, maxDepth = 2) {
+  if (depth > maxDepth) return;
+  let entries;
+  try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+
+  // Sort: dirs first, then files, skip .git and node_modules
+  const skip = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '__pycache__']);
+  entries = entries.filter((e) => !skip.has(e.name)).sort((a, b) => {
+    if (a.isDirectory() === b.isDirectory()) return a.name.localeCompare(b.name);
+    return a.isDirectory() ? -1 : 1;
+  });
+
+  for (const e of entries) {
+    const prefix = '  '.repeat(depth) + (e.isDirectory() ? '📁 ' : '📄 ');
+    log('info', `${prefix}${e.name}`, 'stdout');
+    if (e.isDirectory() && depth < maxDepth) {
+      await listTree(path.join(dir, e.name), log, depth + 1, maxDepth);
+    }
+  }
+}
+
+// ── Stream Kudu build log lines while deployment runs ────────────────────────
+
+async function streamKuduLogs(profile, deploymentId, log, deadline) {
+  const seen = new Set();
   let deployment = null;
 
   while (Date.now() < deadline) {
-    // ── Fetch deployment status ──
-    const statusRes = await kuduRequest(
-      profile, 'GET',
-      deploymentId
-        ? `/api/deployments/${encodeURIComponent(deploymentId)}`
-        : '/api/deployments/latest'
-    );
+    const statusPath = deploymentId
+      ? `/api/deployments/${encodeURIComponent(deploymentId)}`
+      : '/api/deployments/latest';
 
-    if (statusRes.status >= 200 && statusRes.status < 300) {
-      deployment = statusRes.data;
-    }
+    const statusRes = await kuduRequest(profile, 'GET', statusPath).catch(() => null);
+    if (statusRes?.status >= 200 && statusRes?.status < 300) deployment = statusRes.data;
 
-    // ── Fetch and emit new log lines ──
-    const logRes = await kuduRequest(
-      profile, 'GET',
-      deploymentId
-        ? `/api/deployments/${encodeURIComponent(deploymentId)}/log`
-        : '/api/deployments/latest/log'
-    ).catch(() => null);
+    const logPath = deploymentId
+      ? `/api/deployments/${encodeURIComponent(deploymentId)}/log`
+      : '/api/deployments/latest/log';
 
+    const logRes = await kuduRequest(profile, 'GET', logPath).catch(() => null);
     if (logRes?.status === 200 && Array.isArray(logRes.data)) {
       for (const entry of logRes.data) {
-        const msg = entry.message || '';
-        if (msg && !seenMessages.has(msg)) {
-          seenMessages.add(msg);
-          const level = /error|fail/i.test(msg) ? 'error' : 'info';
-          log(level, msg, 'stdout');
-
-          // Also fetch detail sub-entries for this log line
+        if (entry.message && !seen.has(entry.message)) {
+          seen.add(entry.message);
+          log(/error|fail/i.test(entry.message) ? 'error' : 'info', entry.message, 'stdout');
           if (entry.details_url) {
-            try {
-              const detailPath = entry.details_url.replace(/^https?:\/\/[^/]+/, '');
-              const detailRes  = await kuduRequest(profile, 'GET', detailPath);
-              if (detailRes.status === 200 && Array.isArray(detailRes.data)) {
-                for (const d of detailRes.data) {
-                  if (d.message && !seenMessages.has(d.message)) {
-                    seenMessages.add(d.message);
-                    const dlevel = /error|fail/i.test(d.message) ? 'error' : 'info';
-                    log(dlevel, `  └─ ${d.message}`, 'stdout');
-                  }
+            const dp = entry.details_url.replace(/^https?:\/\/[^/]+/, '');
+            const dr = await kuduRequest(profile, 'GET', dp).catch(() => null);
+            if (dr?.status === 200 && Array.isArray(dr.data)) {
+              for (const d of dr.data) {
+                if (d.message && !seen.has(d.message)) {
+                  seen.add(d.message);
+                  log(/error|fail/i.test(d.message) ? 'error' : 'info', `  └─ ${d.message}`, 'stdout');
                 }
               }
-            } catch { /* ignore */ }
+            }
           }
         }
       }
@@ -184,73 +227,50 @@ async function streamKuduBuildLogs(profile, deploymentId, log, deadline) {
     const status = parseDeploymentStatus(deployment);
     if (status === 'success') return { status: 'success', deployment };
     if (status === 'failed')  return { status: 'failed',  deployment };
-
     await new Promise((r) => setTimeout(r, LOG_POLL_INTERVAL_MS));
   }
-
   return { status: 'timeout', deployment };
 }
 
-// ── Get application startup logs on failure ───────────────────────────────────
+// ── Application startup logs ──────────────────────────────────────────────────
 
 async function getKuduAppLogs(profile) {
   try {
-    const res = await kuduRequest(profile, 'GET', '/api/vfs/LogFiles/Application/', { responseType: 'json' });
-    if (res.status !== 200 || !Array.isArray(res.data)) return '';
-    const files = res.data
-      .filter((f) => f.name?.endsWith('.txt'))
+    const r = await kuduRequest(profile, 'GET', '/api/vfs/LogFiles/Application/', { responseType: 'json' });
+    if (r.status !== 200 || !Array.isArray(r.data)) return '';
+    const files = r.data.filter((f) => f.name?.endsWith('.txt'))
       .sort((a, b) => new Date(b.mtime || 0) - new Date(a.mtime || 0));
     if (!files.length) return '';
-    const logRes = await kuduRequest(profile, 'GET', `/api/vfs/LogFiles/Application/${files[0].name}`, { responseType: 'text' });
-    return logRes.status === 200 ? String(logRes.data || '').slice(-8000) : '';
-  } catch {
-    return '';
-  }
+    const lr = await kuduRequest(profile, 'GET', `/api/vfs/LogFiles/Application/${files[0].name}`, { responseType: 'text' });
+    return lr.status === 200 ? String(lr.data || '').slice(-8000) : '';
+  } catch { return ''; }
 }
 
-// ── Format a clear error message from Kudu failure data ──────────────────────
-
-function formatFailureMessage(deployment, appLogs) {
-  const parts = [];
-
-  if (deployment?.message)     parts.push(deployment.message);
-  if (deployment?.status_text) parts.push(deployment.status_text);
-
-  if (appLogs) {
-    parts.push('\n── Application startup logs ──────────────────────────────────');
-    parts.push(appLogs);
-  }
-
-  return parts.filter(Boolean).join('\n').trim() || 'Azure deployment failed — see logs above for details.';
-}
-
-// ── Main deploy function ──────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 /**
- * Deploy a GitHub/Git repository to an Azure App Service using Kudu's
- * built-in external-git deployment. Azure clones the repo, runs Oryx build,
- * and deploys — all on Azure's infrastructure.
- *
  * @param {object}   options
  * @param {string}   options.resourceGroup
- * @param {string}   options.name            — App Service name
- * @param {string}   options.repoUrl         — public or token-authed GitHub URL
- * @param {string}   [options.branch]        — default "main"
- * @param {string}   [options.startCommand]  — e.g. "node server.js"
- * @param {Function} [options.log]           — (level, message, stream, step) => void
+ * @param {string}   options.name
+ * @param {string}   options.repoUrl
+ * @param {string}   [options.branch]
+ * @param {string}   [options.githubToken]
+ * @param {string}   [options.startCommand]
+ * @param {Function} [options.log]   (level, message, stream, step) => void
  */
 async function deployToAppService(options) {
   const {
     resourceGroup,
     name,
     repoUrl,
-    branch        = 'main',
-    startCommand  = '',
-    log: onLog    = () => {},
+    branch       = 'main',
+    githubToken  = '',
+    startCommand = '',
+    log: onLog   = () => {},
   } = options;
 
-  const logs        = [];
-  let   currentStep = '';
+  const logs = [];
+  let currentStep = '';
 
   const log = (level, message, stream = 'info') => {
     const entry = { level, message, ts: new Date(), stream, step: currentStep };
@@ -258,127 +278,203 @@ async function deployToAppService(options) {
     onLog(level, message, stream, currentStep);
   };
 
+  let tempDir;
   try {
     const deadline = Date.now() + DEFAULT_TIMEOUT_MS;
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'firebox-azure-'));
 
-    // ── Step 1: Get Publishing Credentials ───────────────────────────────────
-    currentStep = STEPS.CREDENTIALS;
-    log('info', 'Fetching Azure App Service publishing credentials…');
-    const profileXml = await azure.getPublishingProfile(resourceGroup, name);
-    const profile    = parsePublishProfile(profileXml);
-    log('info', `✓ Kudu endpoint: ${profile.publishUrl}`);
+    const repoDir = path.join(tempDir, 'repo');
+    const zipPath = path.join(tempDir, 'deploy.zip');
 
-    // ── Step 2: Configure App Settings ──────────────────────────────────────
-    currentStep = STEPS.CONFIGURE;
-    log('info', 'Configuring Azure app settings and build options…');
-    const currentSettings = await azure.getAppSettings(resourceGroup, name);
-    await azure.updateAppSettings(resourceGroup, name, {
-      ...currentSettings,
-      SCM_DO_BUILD_DURING_DEPLOYMENT: 'true',
-      ENABLE_ORYX_BUILD:              'true',
-    });
+    // ── 1. Clone ────────────────────────────────────────────────────────────
+    currentStep = STEPS.CLONE;
+    log('info', `Cloning  ${repoUrl}  (branch: ${branch})…`);
 
-    if (startCommand) {
-      await azure.updateSiteConfig(resourceGroup, name, { appCommandLine: startCommand });
-      log('info', `✓ Startup command set: ${startCommand}`);
-    } else {
-      log('info', '✓ No custom startup command — Azure will auto-detect (Oryx)');
+    const cloneEnv = githubToken
+      ? { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraheader', GIT_CONFIG_VALUE_0: `AUTHORIZATION: bearer ${githubToken}` }
+      : {};
+
+    await spawnStreaming(
+      'git',
+      ['clone', '--progress', '--depth', '1', '--branch', branch, repoUrl, repoDir],
+      tempDir, log, cloneEnv
+    );
+    log('info', '✓ Repository cloned');
+
+    // ── 2. Inspect ──────────────────────────────────────────────────────────
+    currentStep = STEPS.INSPECT;
+    log('info', '');
+    log('info', '── Repository contents ───────────────────────────────────');
+    await listTree(repoDir, log);
+    log('info', '──────────────────────────────────────────────────────────');
+
+    // Read package.json
+    const pkgPath = path.join(repoDir, 'package.json');
+    let pkg;
+    try {
+      pkg = JSON.parse(await fs.readFile(pkgPath, 'utf8'));
+      log('info', `package.json  →  name: ${pkg.name || '(unnamed)'},  version: ${pkg.version || '?'}`);
+      if (pkg.scripts?.start) log('info', `  scripts.start: ${pkg.scripts.start}`);
+      if (pkg.scripts?.build) log('info', `  scripts.build: ${pkg.scripts.build}`);
+    } catch {
+      throw deploymentError('No valid package.json found in the repository root');
     }
 
-    // ── Step 3: Trigger Deployment ───────────────────────────────────────────
-    currentStep = STEPS.TRIGGER;
-    log('info', `Sending repository to Azure: ${repoUrl} (branch: ${branch})`);
+    // Resolve startup command
+    let startCmd = startCommand;
+    if (!startCmd) {
+      startCmd = pkg.scripts?.start || (pkg.main ? `node ${pkg.main}` : '');
+      if (!startCmd) {
+        const hasServer = await fs.access(path.join(repoDir, 'server.js')).then(() => true).catch(() => false);
+        if (hasServer) startCmd = 'node server.js';
+        else throw deploymentError('Cannot determine startup command. Add scripts.start to package.json or pass a startCommand.');
+      }
+    }
+    log('info', `Startup command: ${startCmd}`);
 
-    const triggerRes = await kuduRequest(profile, 'POST', '/deploy', {
-      timeout: 30_000,
-      headers: { 'Content-Type': 'application/json' },
-      data: {
-        url:        repoUrl,
-        branch,
-        is_async:   true,
-        format:     'basic',
-        deployer:   'FireboxDeploy',
-        author:     'Firebox Deploy',
+    // Detect package manager
+    const [hasPnpm, hasYarn] = await Promise.all([
+      fs.access(path.join(repoDir, 'pnpm-lock.yaml')).then(() => true).catch(() => false),
+      fs.access(path.join(repoDir, 'yarn.lock')).then(() => true).catch(() => false),
+    ]);
+    const pm = hasPnpm ? 'pnpm' : hasYarn ? 'yarn' : 'npm';
+    log('info', `Package manager: ${pm}`);
+
+    // ── 3. Install ──────────────────────────────────────────────────────────
+    currentStep = STEPS.INSTALL;
+    log('info', '');
+    log('info', `Running ${pm} install…`);
+    const installArgs = pm === 'pnpm' ? ['install', '--frozen-lockfile']
+                      : pm === 'yarn' ? ['install', '--frozen-lockfile']
+                      : ['install'];
+    await spawnStreaming(pm, installArgs, repoDir, log);
+    log('info', '✓ Dependencies installed');
+
+    // ── 4. Build ────────────────────────────────────────────────────────────
+    currentStep = STEPS.BUILD;
+    if (pkg.scripts?.build) {
+      log('info', '');
+      log('info', `Running build: ${pkg.scripts.build}`);
+      await spawnStreaming('npm', ['run', 'build'], repoDir, log);
+      log('info', '✓ Build complete');
+    } else {
+      log('info', 'No build script — skipping');
+    }
+
+    // ── 5. Package ──────────────────────────────────────────────────────────
+    currentStep = STEPS.PACKAGE;
+    log('info', '');
+    log('info', 'Creating deployment ZIP (excluding node_modules, .git)…');
+
+    // Stage: copy without node_modules and .git
+    const stageDir = path.join(tempDir, 'stage');
+    await fs.cp(repoDir, stageDir, {
+      recursive: true,
+      filter: (src) => {
+        const parts = src.split(path.sep);
+        return !parts.includes('.git') && !parts.includes('node_modules');
       },
     });
 
-    if (triggerRes.status !== 202 && triggerRes.status !== 200) {
-      const body = responseBody(triggerRes.data);
+    await spawnStreaming('zip', ['-qr', zipPath, '.'], stageDir, log);
+    const { size } = await fs.stat(zipPath);
+    log('info', `✓ ZIP created  (${(size / 1024).toFixed(1)} KB)`);
+
+    // ── 6. Get Publishing Credentials ───────────────────────────────────────
+    currentStep = STEPS.CREDENTIALS;
+    log('info', '');
+    log('info', 'Fetching Azure publishing credentials…');
+    const profile = parsePublishProfile(await azure.getPublishingProfile(resourceGroup, name));
+    log('info', `✓ Kudu endpoint: ${profile.publishUrl}`);
+
+    // Configure Azure app settings
+    const currentSettings = await azure.getAppSettings(resourceGroup, name);
+    await azure.updateAppSettings(resourceGroup, name, {
+      ...currentSettings,
+      SCM_DO_BUILD_DURING_DEPLOYMENT: 'false',   // we already built locally
+      WEBSITE_RUN_FROM_PACKAGE: '0',
+    });
+    await azure.updateSiteConfig(resourceGroup, name, { appCommandLine: startCmd });
+    log('info', `✓ Startup command set: ${startCmd}`);
+
+    // ── 7. Upload ────────────────────────────────────────────────────────────
+    currentStep = STEPS.UPLOAD;
+    log('info', '');
+    log('info', 'Uploading ZIP to Azure via Kudu Zip Deploy…');
+    const zipBuffer = await fs.readFile(zipPath);
+    const upload = await kuduRequest(profile, 'POST', '/api/zipdeploy?isAsync=true', {
+      timeout: 120_000,
+      headers: { 'Content-Type': 'application/zip' },
+      data: zipBuffer,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
+
+    const deploymentId = extractDeploymentId(upload.headers?.location, upload.data);
+
+    if (upload.status < 200 || upload.status >= 300) {
       throw deploymentError(
-        `Azure rejected the deployment request (HTTP ${triggerRes.status}).\n${body}`,
-        { azureStatus: triggerRes.status, azureBody: triggerRes.data }
+        `Azure rejected the upload (HTTP ${upload.status}).\n${responseBody(upload.data)}`,
+        { azureStatus: upload.status, azureBody: upload.data }
       );
     }
+    log('info', `✓ Upload accepted${deploymentId ? `  (deployment id: ${deploymentId})` : ''}`);
 
-    const deploymentId = extractDeploymentId(triggerRes.headers?.location, triggerRes.data);
-    log('info', `✓ Deployment triggered${deploymentId ? ` (id: ${deploymentId})` : ''}`);
+    // ── 8. Deployment Status ─────────────────────────────────────────────────
+    currentStep = STEPS.POLL;
+    log('info', '');
+    log('info', 'Waiting for Azure to deploy the package…');
 
-    // ── Step 4: Building on Azure ─────────────────────────────────────────────
-    currentStep = STEPS.BUILD;
-    log('info', 'Azure is cloning the repository and building the application…');
-    log('info', '(Azure build logs will appear below as they arrive)');
-
-    const { status: buildStatus, deployment } = await streamKuduBuildLogs(
+    const { status: buildStatus, deployment } = await streamKuduLogs(
       profile, deploymentId, log, deadline
     );
 
     if (buildStatus === 'timeout') {
       throw deploymentError(
-        `Azure build timed out after ${Math.round(DEFAULT_TIMEOUT_MS / 60_000)} minutes.\n` +
-        `Last known status: ${deployment?.status_text || 'unknown'}`,
+        `Azure deployment timed out after ${Math.round(DEFAULT_TIMEOUT_MS / 60_000)} minutes.`,
         { deploymentId, logs }
       );
     }
 
     if (buildStatus === 'failed') {
-      // Gather app startup logs in case the app itself crashed
       const appLogs = await getKuduAppLogs(profile).catch(() => '');
-      if (appLogs) log('error', `── Application logs ──────────────────\n${appLogs}`, 'stderr');
-
-      const msg = formatFailureMessage(deployment, appLogs);
-      throw deploymentError(msg, {
-        azureStatus: triggerRes.status,
-        azureBody:   deployment,
-        deploymentId,
-        logs,
-      });
+      if (appLogs) log('error', `── App startup logs ──\n${appLogs}`, 'stderr');
+      const msg = [deployment?.message, deployment?.status_text, appLogs ? '\n(See startup logs above)' : '']
+        .filter(Boolean).join('\n') || 'Azure deployment failed — see logs above.';
+      throw deploymentError(msg, { deploymentId, logs });
     }
 
-    log('info', '✓ Azure build completed successfully');
+    log('info', '✓ Azure deployment complete');
 
-    // ── Step 5: Verify Application ────────────────────────────────────────────
+    // ── 9. Verify Application ────────────────────────────────────────────────
     currentStep = STEPS.STARTUP;
-    const appUrl   = `https://${name}.azurewebsites.net/`;
-    const startDl  = Date.now() + APP_STARTUP_TIMEOUT_MS;
-    log('info', `Waiting for application to start at ${appUrl}…`);
+    const appUrl  = `https://${name}.azurewebsites.net/`;
+    const startDl = Date.now() + APP_STARTUP_TIMEOUT_MS;
+    log('info', '');
+    log('info', `Waiting for app to start at ${appUrl}…`);
 
     let lastFailure = '';
     while (Date.now() < startDl) {
       try {
-        const res  = await axios.get(appUrl, { timeout: 15_000, responseType: 'text', validateStatus: () => true });
-        const body = String(res.data || '');
+        const r    = await axios.get(appUrl, { timeout: 15_000, responseType: 'text', validateStatus: () => true });
+        const body = String(r.data || '');
         if (/Your web app is running and waiting for your content/i.test(body)) {
-          lastFailure = 'Azure placeholder page still showing — app has not deployed yet';
-        } else if (res.status < 500) {
-          log('info', `✓ Application is live — HTTP ${res.status}`);
-          return { success: true, deploymentId, url: appUrl, httpStatus: res.status, logs };
+          lastFailure = 'Azure placeholder page still showing';
+        } else if (r.status < 500) {
+          log('info', `✓ Application is live — HTTP ${r.status}`);
+          return { success: true, deploymentId, url: appUrl, httpStatus: r.status, logs };
         } else {
-          lastFailure = `Application returned HTTP ${res.status}`;
-          log('warn', `Startup: HTTP ${res.status} — waiting…`);
+          lastFailure = `HTTP ${r.status}`;
+          log('warn', `Startup: HTTP ${r.status} — waiting…`);
         }
-      } catch (err) {
-        lastFailure = err.message;
-      }
+      } catch (e) { lastFailure = e.message; }
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
 
-    // Startup timed out — fetch app logs before throwing
     const appLogs = await getKuduAppLogs(profile).catch(() => '');
-    if (appLogs) log('error', `── Application logs ──────────────────\n${appLogs}`, 'stderr');
-
+    if (appLogs) log('error', `── App startup logs ──\n${appLogs}`, 'stderr');
     throw deploymentError(
-      `Application did not start within ${Math.round(APP_STARTUP_TIMEOUT_MS / 60_000)} minutes.\n` +
-      `Last response: ${lastFailure || 'no response'}`,
+      `App did not start within ${Math.round(APP_STARTUP_TIMEOUT_MS / 60_000)} minutes.\nLast: ${lastFailure}`,
       { deploymentId, logs }
     );
 
@@ -386,12 +482,9 @@ async function deployToAppService(options) {
     err.failedStep = err.failedStep || currentStep;
     if (!err.logs) err.logs = logs;
     throw err;
+  } finally {
+    if (tempDir) await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-module.exports = {
-  deployToAppService,
-  parsePublishProfile,
-  parseDeploymentStatus,
-  STEPS,
-};
+module.exports = { deployToAppService, parsePublishProfile, parseDeploymentStatus, STEPS };

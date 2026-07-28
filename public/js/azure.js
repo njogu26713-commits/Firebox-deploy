@@ -1046,10 +1046,14 @@ function parseSSEChunk(raw, onEvent) {
 
 // Pipeline step order for the progress bar — must match STEPS in azure-deploy.service.js
 const PIPELINE_STEPS = [
+  'Clone Repository',
+  'Inspect Repository',
+  'Install Dependencies',
+  'Build',
+  'Create Package',
   'Get Publishing Credentials',
-  'Configure App Settings',
-  'Trigger Deployment',
-  'Building on Azure',
+  'Upload to Azure',
+  'Deployment Status',
   'Verify Application',
 ];
 
