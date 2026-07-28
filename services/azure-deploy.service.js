@@ -264,9 +264,17 @@ async function listTree(dir, log, depth = 0, maxDepth = 2) {
 
 // ── Stream Kudu build log lines while deployment runs ────────────────────────
 
-async function streamKuduLogs(profile, deploymentId, log, deadline) {
+async function streamKuduLogs(profile, deploymentId, log, deadline, uploadedAt) {
   const seen = new Set();
   let deployment = null;
+
+  // When we have no deployment ID we fall back to /latest.
+  // Add a short initial delay so Kudu has time to register the new deployment
+  // and we don't immediately read the *previous* deployment's success status.
+  if (!deploymentId) {
+    log('info', 'No deployment ID returned — polling /latest (waiting 8 s for Kudu to register)…');
+    await new Promise((r) => setTimeout(r, 8_000));
+  }
 
   while (Date.now() < deadline) {
     const statusPath = deploymentId
@@ -274,7 +282,21 @@ async function streamKuduLogs(profile, deploymentId, log, deadline) {
       : '/api/deployments/latest';
 
     const statusRes = await kuduRequest(profile, 'GET', statusPath).catch(() => null);
-    if (statusRes?.status >= 200 && statusRes?.status < 300) deployment = statusRes.data;
+    if (statusRes?.status >= 200 && statusRes?.status < 300) {
+      const d = statusRes.data;
+      // Guard against a stale /latest entry from a *previous* deployment:
+      // only accept it if its start_time is after our upload, or if we have
+      // an explicit deploymentId (no ambiguity).
+      if (deploymentId || !uploadedAt) {
+        deployment = d;
+      } else {
+        const depTime = d?.start_time ? new Date(d.start_time).getTime() : 0;
+        if (depTime >= uploadedAt - 5_000) {
+          deployment = d;
+        }
+        // else: stale entry, keep waiting
+      }
+    }
 
     const logPath = deploymentId
       ? `/api/deployments/${encodeURIComponent(deploymentId)}/log`
@@ -533,6 +555,7 @@ async function deployToAppService(options) {
         { azureStatus: upload.status, azureBody: upload.data }
       );
     }
+    const uploadedAt = Date.now();
     log('info', `✓ Upload accepted${deploymentId ? `  (deployment id: ${deploymentId})` : ''}`);
 
     // ── 8. Deployment Status ─────────────────────────────────────────────────
@@ -541,7 +564,7 @@ async function deployToAppService(options) {
     log('info', 'Waiting for Azure to deploy the package…');
 
     const { status: buildStatus, deployment } = await streamKuduLogs(
-      profile, deploymentId, log, deadline
+      profile, deploymentId, log, deadline, uploadedAt
     );
 
     if (buildStatus === 'timeout') {
@@ -568,21 +591,60 @@ async function deployToAppService(options) {
     log('info', '');
     log('info', `Waiting for app to start at ${appUrl}…`);
 
+    // Azure placeholder patterns — returned as 200 when the app was never deployed
+    // or the runtime hasn't started yet.
+    const AZURE_PLACEHOLDER = /your web app is running and waiting for your content|hey, node developers!|welcome to app service|this is your default web page|oryx build|microsoft azure app service/i;
+
     let lastFailure = '';
     while (Date.now() < startDl) {
       try {
         const r    = await axios.get(appUrl, { timeout: 15_000, responseType: 'text', validateStatus: () => true });
         const body = String(r.data || '');
-        if (/Your web app is running and waiting for your content/i.test(body)) {
-          lastFailure = 'Azure placeholder page still showing';
-        } else if (r.status < 500) {
-          log('info', `✓ Application is live — HTTP ${r.status}`);
-          return { success: true, deploymentId, url: appUrl, httpStatus: r.status, logs };
+        const bodyLen = body.length;
+
+        log('info', `  → HTTP ${r.status}  (${bodyLen} bytes)`);
+
+        if (r.status >= 200 && r.status < 300) {
+          if (AZURE_PLACEHOLDER.test(body)) {
+            // Azure returned its "not deployed yet" placeholder page
+            lastFailure = 'Azure placeholder page — app not deployed yet';
+            log('warn', `  App is returning Azure's placeholder page — waiting…`);
+          } else if (bodyLen === 0) {
+            // Empty 200 — app may have started but crashed before sending headers
+            lastFailure = 'Empty response body (HTTP 200)';
+            log('warn', '  App returned an empty 200 — may still be starting…');
+          } else {
+            log('info', `✓ Application is live — HTTP ${r.status}`);
+            return { success: true, deploymentId, url: appUrl, httpStatus: r.status, logs };
+          }
+        } else if (r.status === 503 || r.status === 502) {
+          // Azure gateway errors — app hasn't started yet
+          lastFailure = `HTTP ${r.status} (app not ready)`;
+          log('warn', `  HTTP ${r.status} — app not ready yet, waiting…`);
+        } else if (r.status === 404 || r.status === 403) {
+          // 4xx from Azure means the app process isn't running at all
+          // (a running app would serve its own 404/403, not Azure's)
+          const snippet = body.slice(0, 200).replace(/\s+/g, ' ');
+          lastFailure = `HTTP ${r.status} — app process not running (${snippet || 'no body'})`;
+          log('error', `  HTTP ${r.status} — app is not running. Azure response: ${snippet || '(empty)'}`);
+          // Don't keep waiting on a definitive "not running" from Azure — fail fast
+          const appLogs = await getKuduAppLogs(profile).catch(() => '');
+          if (appLogs) log('error', `── App startup logs ──\n${appLogs}`, 'stderr');
+          throw deploymentError(
+            `App deployed but is not running (HTTP ${r.status}).\n` +
+            `Azure returned: ${snippet || '(empty body)'}\n` +
+            (appLogs ? 'See startup logs above for the crash reason.' : 'Check application logs in the Azure portal.'),
+            { deploymentId, logs }
+          );
         } else {
           lastFailure = `HTTP ${r.status}`;
-          log('warn', `Startup: HTTP ${r.status} — waiting…`);
+          log('warn', `  HTTP ${r.status} — waiting…`);
         }
-      } catch (e) { lastFailure = e.message; }
+      } catch (e) {
+        if (e.failedStep) throw e;   // our own deploymentError — rethrow
+        lastFailure = e.message;
+        log('warn', `  Probe failed: ${e.message}`);
+      }
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
 
