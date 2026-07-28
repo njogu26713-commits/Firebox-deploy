@@ -1,4 +1,4 @@
-modules = ["nodejs-18", "web", "bash", "nix"]
+modules = ["nodejs-18", "web", "bash"]
 
 [nix]
 channel = "stable-25_05"
