@@ -239,6 +239,130 @@ function spawnStreaming(cmd, args, cwd, log, extraEnv = {}) {
   });
 }
 
+// ── Start-command detection ───────────────────────────────────────────────────
+
+/**
+ * Resolve the startup command for a Node.js project using a layered strategy:
+ *
+ *  1. Caller-supplied startCommand (highest priority)
+ *  2. package.json  scripts.start
+ *  3. package.json  main  → node <main>
+ *  4. Procfile      web: <cmd>
+ *  5. fireboxdeploy.toml  app.start_command
+ *  6. ecosystem.config.js → pm2 start …
+ *  7. Monorepo workspace sub-packages (apps/, packages/, services/) with scripts.start
+ *  8. Compiled output entry points  dist/ / out/ / build/
+ *  9. Common root-level JS entry points
+ * 10. Throw with an actionable message
+ *
+ * @param {string}   deployPath     Absolute path to the (possibly sub-dir) deploy root
+ * @param {object}   pkg            Parsed package.json object
+ * @param {string}   userStart      Value passed in by the caller (may be empty)
+ * @param {Function} log
+ * @returns {Promise<string>}
+ */
+async function resolveStartCommand(deployPath, pkg, userStart, log) {
+  // ── 1. Caller-supplied ───────────────────────────────────────────────────
+  if (userStart) return userStart;
+
+  // ── 2. scripts.start ────────────────────────────────────────────────────
+  if (pkg.scripts?.start) return pkg.scripts.start;
+
+  // ── 3. pkg.main ─────────────────────────────────────────────────────────
+  if (pkg.main) return `node ${pkg.main}`;
+
+  // ── 4. Procfile ──────────────────────────────────────────────────────────
+  try {
+    const procfile = await fs.readFile(path.join(deployPath, 'Procfile'), 'utf8');
+    const m = procfile.match(/^web:\s*(.+)/m);
+    if (m) {
+      log('info', `  Procfile  →  web: ${m[1].trim()}`);
+      return m[1].trim();
+    }
+  } catch {}
+
+  // ── 5. fireboxdeploy.toml on disk ────────────────────────────────────────
+  try {
+    const tomlContent = await fs.readFile(path.join(deployPath, 'fireboxdeploy.toml'), 'utf8');
+    const tomlSvc = require('./fireboxdeploy-toml.service');
+    const config  = tomlSvc.parseToml(tomlContent);
+    if (config.app?.start_command) {
+      log('info', `  fireboxdeploy.toml  →  start_command: ${config.app.start_command}`);
+      return config.app.start_command;
+    }
+  } catch {}
+
+  // ── 6. PM2 ecosystem.config.js ───────────────────────────────────────────
+  const hasEcosystem = await fs.access(path.join(deployPath, 'ecosystem.config.js')).then(() => true).catch(() => false);
+  if (hasEcosystem) {
+    log('info', '  ecosystem.config.js found  →  pm2 start ecosystem.config.js --no-daemon');
+    return 'pm2 start ecosystem.config.js --no-daemon';
+  }
+
+  // ── 7. Monorepo workspace sub-packages ───────────────────────────────────
+  const hasPnpmWorkspace = await fs.access(path.join(deployPath, 'pnpm-workspace.yaml')).then(() => true).catch(() => false);
+  const isWorkspace      = hasPnpmWorkspace || Array.isArray(pkg.workspaces) || typeof pkg.workspaces === 'object';
+
+  if (isWorkspace) {
+    log('info', '  Workspace monorepo detected — scanning sub-packages for scripts.start…');
+    const searchDirs = ['apps', 'packages', 'services', 'src'];
+    for (const dir of searchDirs) {
+      const dirPath = path.join(deployPath, dir);
+      let entries;
+      try { entries = await fs.readdir(dirPath, { withFileTypes: true }); } catch { continue; }
+      for (const entry of entries.filter((e) => e.isDirectory())) {
+        try {
+          const subPkg = JSON.parse(
+            await fs.readFile(path.join(dirPath, entry.name, 'package.json'), 'utf8')
+          );
+          if (subPkg.scripts?.start) {
+            const rel = `${dir}/${entry.name}`;
+            log('info', `  Found scripts.start in ${rel}/package.json  →  ${subPkg.scripts.start}`);
+            return `cd ${rel} && ${subPkg.scripts.start}`;
+          }
+        } catch {}
+      }
+    }
+    log('warn', '  No sub-package with scripts.start found in workspace — continuing with other checks…');
+  }
+
+  // ── 8. Compiled output entry points ──────────────────────────────────────
+  const distCandidates = [
+    'dist/index.js', 'dist/server.js', 'dist/app.js', 'dist/main.js',
+    'out/index.js',  'out/server.js',
+    'build/index.js','build/server.js',
+  ];
+  for (const c of distCandidates) {
+    if (await fs.access(path.join(deployPath, c)).then(() => true).catch(() => false)) {
+      log('info', `  Found compiled output: ${c}  →  node ${c}`);
+      return `node ${c}`;
+    }
+  }
+
+  // ── 9. Common root-level entry points ────────────────────────────────────
+  const rootCandidates = [
+    'server.js', 'index.js', 'app.js', 'main.js',
+    'src/server.js', 'src/index.js', 'src/app.js', 'src/main.js',
+  ];
+  for (const c of rootCandidates) {
+    if (await fs.access(path.join(deployPath, c)).then(() => true).catch(() => false)) {
+      return `node ${c}`;
+    }
+  }
+
+  // ── 10. Give up ───────────────────────────────────────────────────────────
+  const allChecked = [...rootCandidates, ...distCandidates].join(', ');
+  throw deploymentError(
+    'Cannot determine startup command. ' +
+    'Fix options (pick one):\n' +
+    '  • Add  scripts.start  to package.json\n' +
+    '  • Add a Procfile with  web: node <entrypoint>\n' +
+    '  • Add a fireboxdeploy.toml with  start_command = "node <entrypoint>"\n' +
+    '  • Set startCommand in the Firebox deploy settings\n' +
+    `Files checked: ${allChecked}.`
+  );
+}
+
 // ── Ensure a package manager binary is available, installing it if needed ────
 
 /**
@@ -559,37 +683,8 @@ async function deployToAppService(options) {
     }
 
     // Resolve startup command
-    let startCmd = startCommand;
-    if (!startCmd) {
-      startCmd = pkg.scripts?.start || (pkg.main ? `node ${pkg.main}` : '');
-      if (!startCmd) {
-        // Probe common Node.js entry points in precedence order
-        const candidates = [
-          'server.js',
-          'index.js',
-          'app.js',
-          'main.js',
-          'src/index.js',
-          'src/server.js',
-          'src/app.js',
-          'src/main.js',
-        ];
-        for (const candidate of candidates) {
-          const exists = await fs.access(path.join(deployPath, candidate)).then(() => true).catch(() => false);
-          if (exists) {
-            startCmd = `node ${candidate}`;
-            break;
-          }
-        }
-        if (!startCmd) {
-          throw deploymentError(
-            'Cannot determine startup command. ' +
-            'Add scripts.start to package.json or pass a startCommand. ' +
-            `Checked: ${candidates.join(', ')}.`
-          );
-        }
-      }
-    }
+    log('info', 'Detecting startup command…');
+    const startCmd = await resolveStartCommand(deployPath, pkg, startCommand, log);
     log('info', `Startup command: ${startCmd}`);
 
     // Detect package manager
