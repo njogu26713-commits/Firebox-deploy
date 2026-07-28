@@ -348,12 +348,9 @@
         <input id="dm-branch" value="main" />
       </div>
       <div class="field">
-        <label>Build Command <span style="color:var(--muted-2)">(optional)</span></label>
-        <input id="dm-build" placeholder="npm install && npm run build" />
-      </div>
-      <div class="field">
-        <label>Start Command <span style="color:var(--muted-2)">(optional)</span></label>
+        <label>Start Command <span style="color:var(--muted-2)">(optional — Azure auto-detects if blank)</span></label>
         <input id="dm-start" placeholder="node server.js" />
+        <div class="field-hint">Azure clones your repo and runs <code>npm install</code> + build automatically via Oryx.</div>
       </div>
       <div class="gap-8" style="margin-top:8px;">
         <button class="btn btn-primary" id="confirmDeployBtn">🚀 Deploy</button>

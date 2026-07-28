@@ -1044,18 +1044,13 @@ function parseSSEChunk(raw, onEvent) {
 
 // ── Deploy Modal ───────────────────────────────────────────────────────────
 
-// Pipeline step order for the progress bar
+// Pipeline step order for the progress bar — must match STEPS in azure-deploy.service.js
 const PIPELINE_STEPS = [
-  'Clone Repository',
-  'Install Dependencies',
-  'Build',
-  'Create Package',
-  'Get Publishing Profile',
-  'Configure Azure Settings',
-  'Upload (Zip Deploy)',
-  'Deployment Status',
-  'Verify Deployed Files',
-  'Application Startup',
+  'Get Publishing Credentials',
+  'Configure App Settings',
+  'Trigger Deployment',
+  'Building on Azure',
+  'Verify Application',
 ];
 
 let _dmCurrentDeploymentId = null;   // azureDeploymentId from server, set on success/error
@@ -1128,7 +1123,6 @@ document.getElementById('dm-repo').addEventListener('blur', async () => {
     const { config } = await apiFetch(`/api/azure/toml-detect?repo=${encodeURIComponent(repoUrl)}&branch=${encodeURIComponent(branch)}`);
     if (!config) return;
     if (config.name  && !document.getElementById('dm-name').value)    document.getElementById('dm-name').value  = config.name;
-    if (config.buildCommand)  document.getElementById('dm-build').value = config.buildCommand;
     if (config.startCommand)  document.getElementById('dm-start').value = config.startCommand;
     if (config.branch)        document.getElementById('dm-branch').value = config.branch;
     if (config.region) {
@@ -1155,7 +1149,6 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
   const sku     = document.getElementById('dm-sku').value;
   const repoUrl = document.getElementById('dm-repo').value.trim();
   const branch  = document.getElementById('dm-branch').value.trim() || 'main';
-  const build   = document.getElementById('dm-build').value.trim();
   const start   = document.getElementById('dm-start').value.trim();
 
   if (!name || !rg) { showToast('App name and resource group are required', 'error'); return; }
@@ -1193,7 +1186,7 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
         planName, planSku: sku,
         runtime: runtime.split('|')[0].toLowerCase(),
         repoUrl, branch,
-        buildCommand: build, startCommand: start,
+        startCommand: start,
         azureUrl: `${name}.azurewebsites.net`,
       }),
     }).catch(() => {}); // non-fatal
@@ -1220,7 +1213,7 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
       {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ repoUrl, branch, buildCommand: build, startCommand: start }),
+        body:    JSON.stringify({ repoUrl, branch, startCommand: start }),
         credentials: 'same-origin',
       }
     );
