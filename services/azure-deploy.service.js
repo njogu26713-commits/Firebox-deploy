@@ -478,9 +478,31 @@ async function deployToAppService(options) {
     if (!startCmd) {
       startCmd = pkg.scripts?.start || (pkg.main ? `node ${pkg.main}` : '');
       if (!startCmd) {
-        const hasServer = await fs.access(path.join(deployPath, 'server.js')).then(() => true).catch(() => false);
-        if (hasServer) startCmd = 'node server.js';
-        else throw deploymentError('Cannot determine startup command. Add scripts.start to package.json or pass a startCommand.');
+        // Probe common Node.js entry points in precedence order
+        const candidates = [
+          'server.js',
+          'index.js',
+          'app.js',
+          'main.js',
+          'src/index.js',
+          'src/server.js',
+          'src/app.js',
+          'src/main.js',
+        ];
+        for (const candidate of candidates) {
+          const exists = await fs.access(path.join(deployPath, candidate)).then(() => true).catch(() => false);
+          if (exists) {
+            startCmd = `node ${candidate}`;
+            break;
+          }
+        }
+        if (!startCmd) {
+          throw deploymentError(
+            'Cannot determine startup command. ' +
+            'Add scripts.start to package.json or pass a startCommand. ' +
+            `Checked: ${candidates.join(', ')}.`
+          );
+        }
       }
     }
     log('info', `Startup command: ${startCmd}`);
