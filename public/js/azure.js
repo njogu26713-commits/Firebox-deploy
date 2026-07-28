@@ -1153,32 +1153,55 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
 
   if (!name || !rg) { showToast('App name and resource group are required', 'error'); return; }
 
-  const btn = document.getElementById('confirmDeployBtn');
-  btn.disabled    = true;
-  btn.textContent = 'Setting up…';
+  // ── Switch to log screen immediately ───────────────────────────────────────
+  document.getElementById('dm-form').style.display = 'none';
+  document.getElementById('dm-log-screen').style.display = '';
+  document.getElementById('deployModalTitle').textContent = `Deploying ${name}…`;
+  renderStepProgress('', '');
+
+  // Helper: write a line directly into the terminal without needing an SSE event
+  const termLog = (message, level = 'info') => appendTerminalLine({ message, level, stream: 'info' });
+
+  const showError = (message, failedStep) => {
+    document.getElementById('dm-terminal-spinner').style.display = 'none';
+    if (failedStep) renderStepProgress(failedStep, failedStep);
+    const resultEl = document.getElementById('dm-result');
+    resultEl.innerHTML = `
+      <div style="padding:12px 14px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:6px;">
+        <div style="color:#f87171;font-weight:600;margin-bottom:4px;">✕ Deployment failed</div>
+        ${failedStep ? `<div style="font-size:12px;margin-top:4px;">Failed at: <strong>${escapeHtml(failedStep)}</strong></div>` : ''}
+        <div style="font-size:12px;margin-top:6px;color:var(--muted);white-space:pre-wrap;max-height:160px;overflow-y:auto;">${escapeHtml((message || '').slice(0, 800))}${(message || '').length > 800 ? '…' : ''}</div>
+      </div>`;
+    resultEl.style.display = 'block';
+    document.getElementById('dm-post-actions').style.display = 'flex';
+    document.getElementById('deployModalTitle').textContent = `✕ ${name} failed`;
+    loadTrackedApps();
+  };
 
   try {
-    // Step 1: Create App Service Plan
-    btn.textContent = 'Creating plan…';
+    // ── Step 1: Create App Service Plan ────────────────────────────────────
     const planName = `${name}-plan`;
+    termLog(`Creating App Service Plan "${planName}" (${sku}, ${region})…`);
     await apiFetch('/api/azure/plans', {
       method: 'POST',
       body: JSON.stringify({ resourceGroup: rg, name: planName, location: region, sku }),
     });
+    termLog(`✓ Plan "${planName}" ready`);
 
-    // Step 2: Find plan ID
+    // ── Step 2: Find plan ID ────────────────────────────────────────────────
     const { plans } = await apiFetch('/api/azure/plans');
     const plan   = plans.find((p) => p.name === planName);
     const planId = plan?.id || '';
 
-    // Step 3: Create Web App
-    btn.textContent = 'Creating web app…';
+    // ── Step 3: Create Web App ──────────────────────────────────────────────
+    termLog(`Creating Web App "${name}" (${runtime})…`);
     await apiFetch('/api/azure/apps', {
       method: 'POST',
       body: JSON.stringify({ resourceGroup: rg, name, location: region, planId, runtimeStack: runtime }),
     });
+    termLog(`✓ Web App "${name}" created → https://${name}.azurewebsites.net`);
 
-    // Step 4: Track locally (pre-flight, before deploy)
+    // ── Step 4: Track locally ───────────────────────────────────────────────
     await apiFetch('/api/azure/tracked-apps', {
       method: 'POST',
       body: JSON.stringify({
@@ -1189,31 +1212,31 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
         startCommand: start,
         azureUrl: `${name}.azurewebsites.net`,
       }),
-    }).catch(() => {}); // non-fatal
+    }).catch(() => {});
 
     if (!repoUrl) {
-      showToast('App created in Azure (no repo — skipping deploy)', 'success');
-      closeModal('deployModal');
-      resetDeployModal();
+      document.getElementById('dm-terminal-spinner').style.display = 'none';
+      termLog('No repository URL provided — app created without deployment.');
+      const resultEl = document.getElementById('dm-result');
+      resultEl.innerHTML = `<div style="padding:12px 14px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);border-radius:6px;color:#4ade80;font-weight:600;">✓ App created in Azure</div>`;
+      resultEl.style.display = 'block';
+      document.getElementById('dm-post-actions').style.display = 'flex';
+      document.getElementById('deployModalTitle').textContent = `✓ ${name} created`;
       loadTrackedApps();
       loadLiveApps();
       return;
     }
 
-    // Step 5: Switch modal to log screen and stream the deployment
-    document.getElementById('dm-form').style.display = 'none';
-    document.getElementById('dm-log-screen').style.display = '';
-    document.getElementById('deployModalTitle').textContent = `Deploying ${name}…`;
-    renderStepProgress('', '');
-
-    let lastStep = '';
+    // ── Step 5: Stream deployment ───────────────────────────────────────────
+    termLog(`\nStarting deployment from ${repoUrl} (${branch})…`);
+    termLog('─────────────────────────────────────────────────────────────');
 
     const response = await fetch(
       `/api/azure/apps/${encodeURIComponent(rg)}/${encodeURIComponent(name)}/deploy-stream`,
       {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ repoUrl, branch, startCommand: start }),
+        method:      'POST',
+        headers:     { 'Content-Type': 'application/json' },
+        body:        JSON.stringify({ repoUrl, branch, startCommand: start }),
         credentials: 'same-origin',
       }
     );
@@ -1224,14 +1247,14 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
 
     const reader  = response.body.getReader();
     const decoder = new TextDecoder();
-    let buffer    = '';
+    let   buffer  = '';
+    let   lastStep = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      // Process complete SSE blocks (end with \n\n)
       const splitAt = buffer.lastIndexOf('\n\n');
       if (splitAt === -1) continue;
       const ready = buffer.slice(0, splitAt + 2);
@@ -1246,7 +1269,6 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
         } else if (event === 'success') {
           _dmCurrentDeploymentId = data.azureDeploymentId;
           document.getElementById('dm-terminal-spinner').style.display = 'none';
-          // Mark all steps done
           renderStepProgress('__done__', '');
           const resultEl = document.getElementById('dm-result');
           resultEl.innerHTML = `
@@ -1261,64 +1283,28 @@ document.getElementById('confirmDeployBtn').addEventListener('click', async () =
           loadLiveApps();
         } else if (event === 'error') {
           _dmCurrentDeploymentId = data.azureDeploymentId;
-          document.getElementById('dm-terminal-spinner').style.display = 'none';
-          if (data.failedStep) renderStepProgress(data.failedStep, data.failedStep);
-
-          const resultEl = document.getElementById('dm-result');
-          const failedStepHtml = data.failedStep
-            ? `<div style="font-size:12px;margin-top:4px;">Failed at step: <strong>${escapeHtml(data.failedStep)}</strong></div>`
-            : '';
-          resultEl.innerHTML = `
-            <div style="padding:12px 14px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:6px;">
-              <div style="color:#f87171;font-weight:600;margin-bottom:4px;">✕ Deployment failed</div>
-              ${failedStepHtml}
-              <div style="font-size:12px;margin-top:6px;color:var(--muted);white-space:pre-wrap;max-height:120px;overflow-y:auto;">${escapeHtml((data.message || '').slice(0, 600))}${(data.message || '').length > 600 ? '…' : ''}</div>
-            </div>`;
-          resultEl.style.display = 'block';
-          document.getElementById('dm-post-actions').style.display = 'flex';
-          document.getElementById('deployModalTitle').textContent = `✕ ${name} failed`;
-          loadTrackedApps();
+          showError(data.message, data.failedStep || lastStep);
         }
       });
     }
 
-    // Handle any remaining buffer
+    // Drain any remaining buffer
     if (buffer.trim()) {
       parseSSEChunk(buffer + '\n\n', (event, data) => {
         if (event === 'log')     appendTerminalLine(data);
         if (event === 'success') document.getElementById('dm-terminal-spinner').style.display = 'none';
-        if (event === 'error')   document.getElementById('dm-terminal-spinner').style.display = 'none';
+        if (event === 'error')   showError(data.message, data.failedStep);
       });
     }
 
   } catch (err) {
-    // Handle region/policy errors gracefully
     const isRegionError = /location|region|not available|policy|GeoPairWith|availability zone/i.test(err.message || '');
     if (isRegionError) {
       _regionsCache = null;
       await loadRegions(true);
-      // Show on form screen if we haven't switched yet
-      if (document.getElementById('dm-form').style.display !== 'none') {
-        showToast(`Region rejected — dropdown refreshed. Select another and retry. (${err.message})`, 'error');
-      } else {
-        document.getElementById('dm-terminal-spinner').style.display = 'none';
-        const resultEl = document.getElementById('dm-result');
-        resultEl.innerHTML = `<div style="padding:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;">${escapeHtml(err.message)}</div>`;
-        resultEl.style.display = 'block';
-        document.getElementById('dm-post-actions').style.display = 'flex';
-      }
+      showError(`Region rejected — select another region and try again.\n\n${err.message}`, '');
     } else {
-      if (document.getElementById('dm-log-screen').style.display !== 'none') {
-        document.getElementById('dm-terminal-spinner').style.display = 'none';
-        const resultEl = document.getElementById('dm-result');
-        resultEl.innerHTML = `<div style="padding:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;">${escapeHtml(err.message)}</div>`;
-        resultEl.style.display = 'block';
-        document.getElementById('dm-post-actions').style.display = 'flex';
-      } else {
-        showToast(err.message, 'error');
-        btn.disabled    = false;
-        btn.textContent = '🚀 Deploy';
-      }
+      showError(err.message, '');
     }
   }
 });
