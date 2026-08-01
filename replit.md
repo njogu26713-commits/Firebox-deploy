@@ -8,9 +8,7 @@ A self-hosted deployment platform for Node.js apps, APIs, websites, and bots —
 - **Database:** MongoDB (Mongoose) — hosted on MongoDB Atlas
 - **Realtime:** Socket.IO (live deployment logs)
 - **Auth:** Session-based (connect-mongo) + JWT
-- **Frontend:** Plain HTML/CSS/JS, no framework
-
-## How to run
+- **Frontend:** Plain HTML/CSS/JS, no frame
 
 The app starts automatically via the **Start application** workflow (`node server.js`) on port 5000.
 
