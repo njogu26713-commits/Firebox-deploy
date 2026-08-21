@@ -7,6 +7,7 @@ const UserWorkspaceSchema = new mongoose.Schema(
     githubUsername: { type: String, default: '', trim: true, maxlength: 120 },
     githubToken: { type: String, default: '' },
     githubConnectedAt: { type: Date },
+    githubAuthMethod: { type: String, enum: ['oauth', 'pat'], default: 'pat' },
     projects: [{
       name: { type: String, required: true, trim: true, maxlength: 120 },
       repoUrl: { type: String, required: true, trim: true, maxlength: 500 },

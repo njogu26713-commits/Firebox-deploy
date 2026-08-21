@@ -17,5 +17,8 @@ module.exports = {
 
   github: {
     webhookSecret: process.env.GITHUB_WEBHOOK_SECRET || '',
+    oauthClientId: process.env.GITHUB_OAUTH_CLIENT_ID || '',
+    oauthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET || '',
+    oauthCallbackUrl: process.env.GITHUB_OAUTH_CALLBACK_URL || '',
   },
 };

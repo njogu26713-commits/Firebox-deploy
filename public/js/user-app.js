@@ -62,6 +62,16 @@ function renderUserHistory(records) {
 async function loadUserHistory() { await loadWorkspace(); }
 document.getElementById('refreshUserHistory').addEventListener('click', loadUserHistory);
 
+document.getElementById('chooseGithubOAuth').addEventListener('click', () => {
+  document.getElementById('githubConnectionForm').style.display = 'none';
+  document.getElementById('githubOAuthHint').style.display = 'block';
+  window.location.href = '/api/user/workspace/github/oauth/start';
+});
+document.getElementById('chooseGithubToken').addEventListener('click', () => {
+  document.getElementById('githubConnectionForm').style.display = 'block';
+  document.getElementById('githubOAuthHint').style.display = 'none';
+});
+
 document.querySelectorAll('[data-create]').forEach((choice) => choice.addEventListener('click', () => {
   document.getElementById('githubCreateForm').style.display = choice.dataset.create === 'github' ? 'block' : 'none';
   document.getElementById('uploadCreateForm').style.display = choice.dataset.create === 'upload' ? 'block' : 'none';
@@ -119,9 +129,13 @@ async function loadGithubConnection() {
     const connection = await userFetch('/api/user/workspace/github-connection');
     const dot = document.getElementById('githubStatusDot');
     document.getElementById('githubStatusTitle').textContent = connection.connected ? `GitHub connected as ${connection.username}` : 'GitHub is not connected';
-    document.getElementById('githubStatusText').textContent = connection.connected ? 'You can now import an existing repository.' : 'Add your GitHub username and personal access token to continue.';
+    document.getElementById('githubStatusText').textContent = connection.connected ? `Connected using ${connection.authMethod === 'oauth' ? 'GitHub authorization' : 'personal access token'}.` : 'Choose GitHub authorization or a personal access token below.';
     dot.classList.toggle('connected', connection.connected);
     document.getElementById('connectedGithubImport').style.display = connection.connected ? 'block' : 'none';
+    if (connection.authMethod === 'oauth') {
+      document.getElementById('githubConnectionForm').style.display = 'none';
+      document.getElementById('githubOAuthHint').style.display = 'none';
+    }
     if (connection.connected) document.getElementById('githubUsername').value = connection.username;
   } catch (err) { showFormMessage('githubConnectionMessage', err.message, true); }
 }

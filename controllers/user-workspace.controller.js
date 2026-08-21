@@ -15,7 +15,7 @@ async function getWorkspace(req, res, next) {
 async function getGithubConnection(req, res, next) {
   try {
     const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) }).lean();
-    res.json({ connected: !!(workspace && workspace.githubToken), username: workspace?.githubUsername || '', connectedAt: workspace?.githubConnectedAt || null });
+    res.json({ connected: !!(workspace && workspace.githubToken), username: workspace?.githubUsername || '', authMethod: workspace?.githubAuthMethod || null, connectedAt: workspace?.githubConnectedAt || null });
   } catch (err) { next(err); }
 }
 
@@ -26,7 +26,7 @@ async function saveGithubConnection(req, res, next) {
     if (!username || !token) return res.status(400).json({ error: 'GitHub username and personal access token are required.' });
     const workspace = await UserWorkspace.findOneAndUpdate(
       { sessionKey: sessionKey(req) },
-      { $set: { githubUsername: username, githubToken: encrypt(token), githubConnectedAt: new Date() }, $setOnInsert: { sessionKey: sessionKey(req) } },
+      { $set: { githubUsername: username, githubToken: encrypt(token), githubConnectedAt: new Date(), githubAuthMethod: 'pat' }, $setOnInsert: { sessionKey: sessionKey(req) } },
       { upsert: true, new: true, runValidators: true }
     ).lean();
     res.json({ connected: true, username: workspace.githubUsername, connectedAt: workspace.githubConnectedAt });
