@@ -28,6 +28,13 @@ test('Azure Agent client authenticates and normalizes common failures', async ()
   assert.equal(calls[0].options.headers.Authorization, 'Bearer test-secret-that-is-never-logged');
   assert.equal(calls[0].requestOptions.url, '/health');
 
+  const deployCalls = mockRequest(async () => ({ data: { success: true, jobId: 'job_test' } }));
+  const deployment = await azureAgent.deploy('demo-project', { runtime: 'node', packageManager: 'npm', hasBuildScript: true, hasStartScript: true, port: 3000 });
+  assert.equal(deployment.jobId, 'job_test');
+  assert.equal(deployCalls[0].requestOptions.url, '/api/projects/demo-project/deploy');
+  assert.equal(deployCalls[0].requestOptions.data.runtime, 'node');
+  assert.equal(deployCalls[0].requestOptions.data.port, 3000);
+
   axios.create = () => ({ request: async () => { throw { response: { status: 401, data: { error: 'Unauthorized' } } }; } });
   await assert.rejects(() => azureAgent.jobStatus('job_1'), /authentication failed/i);
 

@@ -137,7 +137,7 @@ async function deployProject(req, res, next) {
       let slug = `user-${baseSlug}`;
       let suffix = 1;
       while (await Project.exists({ slug })) { slug = `user-${baseSlug}-${suffix++}`; }
-      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: projectType, deploymentTarget, githubRepoFullName: `${githubMatch[1]}/${githubMatch[2]}`, repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
+      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: projectType, deploymentTarget, githubRepoFullName: `${githubMatch[1]}/${githubMatch[2]}`, repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', packageManager: project.packageManager || 'npm', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
       project.deploymentProjectId = deploymentProject._id;
     } else {
       deploymentProject.type = projectType;
@@ -146,6 +146,7 @@ async function deployProject(req, res, next) {
       deploymentProject.githubRepoFullName = `${githubMatch[1]}/${githubMatch[2]}`;
       deploymentProject.githubBranch = project.branch || 'main';
       deploymentProject.githubToken = workspace.githubToken || '';
+      deploymentProject.packageManager = project.packageManager || 'npm';
       deploymentProject.buildCommand = project.buildCommand || '';
       deploymentProject.startCommand = project.startCommand || '';
       await deploymentProject.save();

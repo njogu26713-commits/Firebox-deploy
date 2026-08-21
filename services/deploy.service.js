@@ -91,6 +91,7 @@ async function shouldUseAzureAgent(project) {
   if (mode === 'ssh') return false;
   if (mode === 'azure-agent' && !azureAgent.getConfigStatus().configured) throw new Error('FIREBOX_DEPLOY_TRANSPORT=azure-agent requires FIREBOX_AZURE_AGENT_URL and FIREBOX_AZURE_AGENT_SECRET.');
   if (!azureAgent.getConfigStatus().configured) return false;
+  if (project.deploymentTarget === 'azure-agent') return true;
   if (project.type === 'docker') return true;
   if (!project.githubToken) return false;
   try {
@@ -116,10 +117,13 @@ async function runAzureAgentPipeline(project, deployment, log) {
     await azureAgent.writeFile(project.slug, '.env', envContent);
     log('info', `✓ Environment file transferred (${project.envVars.length} variables)`);
   }
-  const runtime = project.type === 'docker' ? 'docker' : '';
-  if (runtime !== 'docker') throw new Error('Azure Agent deployment currently requires a Docker project.');
-  log('info', '[3/4] Starting controlled Docker deployment on the Azure Agent…');
-  const started = await azureAgent.deploy(project.slug, { runtime, port: projectPort(project) });
+  const runtime = project.type === 'docker' ? 'docker' : 'node';
+  const packageManager = ['npm', 'pnpm', 'yarn'].includes(project.packageManager) ? project.packageManager : 'npm';
+  const hasBuildScript = Boolean(project.buildCommand);
+  const hasStartScript = Boolean(project.startCommand);
+  if (runtime === 'node' && !hasStartScript) throw new Error('Azure Agent Node deployment requires a detected package.json start script.');
+  log('info', `[3/4] Starting controlled ${runtime} deployment on the Azure Agent…`);
+  const started = await azureAgent.deploy(project.slug, { runtime, port: projectPort(project), packageManager, hasBuildScript, hasStartScript, healthPath: project.healthPath || '/' });
   log('info', `✓ Azure Agent job ${started.jobId} queued`);
   let seenLogs = 0;
   const deadline = Date.now() + 15 * 60 * 1000;
@@ -221,7 +225,7 @@ async function runDeployPipeline(project, deployment) {
     // deployments are preserved while the migration is staged safely.
     const deploymentTarget = project.deploymentTarget || (configuredTransportMode() === 'ssh' ? 'ssh' : 'azure-agent');
     const useAzureAgent = deploymentTarget === 'azure-agent' ? await shouldUseAzureAgent(project) : false;
-    if (deploymentTarget === 'azure-agent' && !useAzureAgent) throw new Error('Azure Agent target is selected, but the repository does not contain a supported Dockerfile or the Agent is not configured. Direct SSH fallback is disabled.');
+    if (deploymentTarget === 'azure-agent' && !useAzureAgent) throw new Error('Azure Agent target is selected, but the Agent is not configured. Direct SSH fallback is disabled.');
     if (useAzureAgent) {
       log('info', 'Using authenticated Azure Agent transport; direct Railway-to-VM SSH is not used.');
       await logger.setStatus(deployment, 'building');

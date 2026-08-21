@@ -34,6 +34,7 @@ const ProjectSchema = new mongoose.Schema(
 
     // ── Build config ─────────────────────────────────────────────────────
     rootDirectory: { type: String, default: '.' },
+    packageManager: { type: String, enum: ['npm', 'pnpm', 'yarn'], default: 'npm' },
     buildCommand:  { type: String, default: '' },
     startCommand:  { type: String, default: '' },
 
