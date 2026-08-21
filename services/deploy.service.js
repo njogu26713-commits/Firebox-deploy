@@ -103,6 +103,16 @@ async function shouldUseAzureAgent(project) {
   }
 }
 
+function generatedNodeDockerfile(project, port) {
+  const packageManager = ['npm', 'pnpm', 'yarn'].includes(project.packageManager) ? project.packageManager : 'npm';
+  const installAndBuild = packageManager === 'pnpm'
+    ? 'corepack enable && pnpm install --frozen-lockfile && pnpm run build --if-present'
+    : packageManager === 'yarn'
+      ? 'corepack enable && yarn install --frozen-lockfile && yarn run build --if-present'
+      : 'if [ -f package-lock.json ]; then npm ci; else npm install; fi && npm run build --if-present';
+  return `FROM node:20-bookworm-slim\nWORKDIR /app\nCOPY . .\nRUN ${installAndBuild}\nENV NODE_ENV=production PORT=${port}\nEXPOSE ${port}\nCMD ["npm", "run", "start"]\n`;
+}
+
 async function runAzureAgentPipeline(project, deployment, log) {
   const token = project.githubToken ? cryptoSvc.decrypt(project.githubToken) : '';
   if (!token) throw new Error('The project has no encrypted GitHub token available for Azure Agent deployment.');
@@ -117,13 +127,14 @@ async function runAzureAgentPipeline(project, deployment, log) {
     await azureAgent.writeFile(project.slug, '.env', envContent);
     log('info', `✓ Environment file transferred (${project.envVars.length} variables)`);
   }
-  const runtime = project.type === 'docker' ? 'docker' : 'node';
-  const packageManager = ['npm', 'pnpm', 'yarn'].includes(project.packageManager) ? project.packageManager : 'npm';
-  const hasBuildScript = Boolean(project.buildCommand);
-  const hasStartScript = Boolean(project.startCommand);
-  if (runtime === 'node' && !hasStartScript) throw new Error('Azure Agent Node deployment requires a detected package.json start script.');
-  log('info', `[3/4] Starting controlled ${runtime} deployment on the Azure Agent…`);
-  const started = await azureAgent.deploy(project.slug, { runtime, port: projectPort(project), packageManager, hasBuildScript, hasStartScript, healthPath: project.healthPath || '/' });
+  const port = projectPort(project);
+  const isDockerProject = project.type === 'docker' || files.some((file) => file.path === 'Dockerfile');
+  if (!isDockerProject) {
+    log('info', '[3/4] Preparing a generated Dockerfile for the Node project on the Azure Agent…');
+    await azureAgent.writeFile(project.slug, 'Dockerfile', generatedNodeDockerfile(project, port));
+  }
+  log('info', '[3/4] Starting controlled Docker deployment on the Azure Agent…');
+  const started = await azureAgent.deploy(project.slug, { runtime: 'docker', port });
   log('info', `✓ Azure Agent job ${started.jobId} queued`);
   let seenLogs = 0;
   const deadline = Date.now() + 15 * 60 * 1000;
