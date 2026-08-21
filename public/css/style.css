@@ -779,3 +779,26 @@ body, .sidebar, .topbar, .card, .btn, input, select, textarea {
 .history-toolbar { display: flex; gap: 8px; margin-bottom: 16px; }.history-filter { padding: 7px 11px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 11px; }.history-filter.active { color: var(--text); background: var(--surface-2); }.history-list { display: grid; gap: 10px; }.history-row { display: flex; align-items: center; gap: 14px; padding: 15px 17px; }.history-row-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--amber); color: #111; }.history-row-icon.success { background: var(--teal-dim); color: var(--teal); }.history-row-icon.failed { background: rgba(255,68,68,.12); color: var(--danger); }.history-row-main { display: flex; flex-direction: column; gap: 3px; flex: 1; }.history-row-main strong { font: 600 14px var(--font-display); }.history-row-main span, .history-row-status small { color: var(--muted); font-size: 11px; }.history-row-status { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }.history-row-status b { font-size: 11px; }
 @media (max-width: 900px) { .landing-hero { grid-template-columns: 1fr; padding-top: 44px; }.landing-visual { order: -1; }.landing-hero-copy { text-align: center; margin: auto; }.landing-hero-copy > p { margin-left: auto; margin-right: auto; }.landing-actions, .landing-proof { justify-content: center; }.home-stat-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 620px) { .landing-header { padding: 16px; }.landing-nav > a:first-child { display: none; }.landing-header .landing-nav { gap: 8px; }.landing-hero { padding: 32px 16px 60px; }.landing-hero h1 { font-size: 48px; }.visual-window { transform: none; }.landing-features { grid-template-columns: 1fr; padding: 0 16px 50px; }.landing-footer { margin: 0 16px; padding-left: 0; padding-right: 0; }.home-welcome { align-items: flex-start; }.home-welcome-mark { display: none; }.home-stat-grid { grid-template-columns: 1fr 1fr; }.history-row-status { align-items: flex-start; }.history-row { align-items: flex-start; } }
+
+/* ── Single-page user workspace ───────────────────────────────────── */
+.user-sidebar .nav-item { width: 100%; border: 0; background: transparent; text-align: left; }
+.user-app-content { max-width: 1180px; }
+.user-panel { display: none; animation: userPanelIn .16s ease-out; }
+.user-panel.active { display: block; }
+@keyframes userPanelIn { from { opacity: .3; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.panel-heading h2 { margin-top: 5px; font-size: 25px; }
+.panel-heading p { color: var(--muted); margin: 6px 0 0; }
+.user-form { padding: 22px; }
+.user-form-footer { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 4px; }
+.form-success { color: var(--teal); font-size: 12px; }
+.user-provider-grid { margin-bottom: 18px; }
+.user-provider-card { min-height: 122px; }
+.user-deploy-form { margin-top: 4px; }
+.settings-summary { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.settings-summary > div:not(.settings-avatar) { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.settings-summary strong { font: 600 16px var(--font-display); }.settings-summary span { color: var(--muted); font-size: 12px; }
+.settings-avatar { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); }
+.theme-toggle-inline { padding: 9px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text); cursor: pointer; font: 600 12px var(--font-body); }
+.user-info-card p { color: var(--muted); margin: 8px 0 16px; }
+@media (max-width: 640px) { .panel-heading { flex-direction: column; }.user-form-footer { align-items: stretch; flex-direction: column; }.settings-summary { align-items: flex-start; flex-wrap: wrap; }.settings-summary .theme-toggle-inline { margin-left: 56px; } }
