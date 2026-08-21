@@ -32,6 +32,15 @@ function logout(req, res) {
 }
 
 async function me(req, res) {
+  if (config.authDisabled) {
+    return res.json({
+      user: {
+        id: 'dev-auth-disabled',
+        name: 'Development user',
+        email: 'dev@localhost',
+      },
+    });
+  }
   const userId = req.session.userId || req.userId;
   const user = await User.findById(userId);
   if (!user) return res.status(404).json({ error: 'User not found' });

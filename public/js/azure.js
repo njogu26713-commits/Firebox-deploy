@@ -34,7 +34,7 @@ async function init() {
   document.getElementById('mainContent').style.display = 'block';
 
   if (!azureConfigured) {
-    document.getElementById('notConfiguredBanner').style.display = 'none';
+    document.getElementById('notConfiguredBanner').style.display = 'block';
     showTab('settings');
     const panel = document.getElementById('panel-settings');
     if (panel && !panel.querySelector('.azure-setup-notice')) {
