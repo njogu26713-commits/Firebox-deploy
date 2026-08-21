@@ -16,13 +16,30 @@ const { Client } = require('ssh2');
  * @param {string} [opts.password]    password (alternative to privateKey)
  * @returns {Promise<Client>}
  */
-function connect({ host, port = 22, username, privateKey, password }) {
+function connect({ host, port = 22, username, privateKey, password, readyTimeout = 30000 }) {
   return new Promise((resolve, reject) => {
     const conn = new Client();
+    let settled = false;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      conn.end();
+      const detail = String(err?.message || err || 'Unknown SSH connection error');
+      const wrapped = new Error(`SSH connection to ${host}:${Number(port)} failed: ${detail}`);
+      wrapped.code = err?.code;
+      reject(wrapped);
+    };
+    const timer = setTimeout(() => fail(new Error(`Timed out waiting for SSH handshake after ${readyTimeout}ms`)), readyTimeout + 1000);
     conn
-      .on('ready', () => resolve(conn))
-      .on('error', reject)
-      .connect({ host, port: Number(port), username, privateKey, password });
+      .on('ready', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(conn);
+      })
+      .on('error', fail)
+      .on('timeout', () => fail(new Error('SSH socket timed out before the handshake completed')))
+      .connect({ host, port: Number(port), username, privateKey, password, readyTimeout, keepaliveInterval: 10000, keepaliveCountMax: 3 });
   });
 }
 

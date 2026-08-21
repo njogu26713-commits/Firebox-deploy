@@ -86,6 +86,21 @@ document.getElementById('saveSshBtn').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('testSshBtn').addEventListener('click', async () => {
+  const button = document.getElementById('testSshBtn');
+  button.disabled = true;
+  button.textContent = 'Testing…';
+  try {
+    const result = await apiFetch('/api/settings/ssh-credentials/test', { method: 'POST', body: '{}' });
+    showToast(result.message || 'SSH connection established.', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Test connection';
+  }
+});
+
 document.getElementById('removeSshBtn').addEventListener('click', async () => {
   if (!confirm('Remove SSH credentials? You will not be able to deploy until you re-add them.')) return;
   try {

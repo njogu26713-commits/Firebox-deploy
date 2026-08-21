@@ -393,7 +393,9 @@ async function runDeployPipeline(project, deployment) {
     });
 
   } catch (err) {
-    log('error', `❌ Deployment failed: ${err.message}`);
+    const detail = String(err.message || err);
+    const connectionHint = /handshake|timed out|timeout/i.test(detail) ? ' Check VPS reachability, the SSH port, and the VPS firewall/provider allowlist.' : /authentication|auth|key|password/i.test(detail) ? ' Check the configured SSH username and private key or password.' : '';
+    log('error', `❌ Deployment failed: ${detail}${connectionHint}`);
 
     await Promise.all(pendingLogWrites);
     deployment.logs = logBuffer;
