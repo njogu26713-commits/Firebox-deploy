@@ -9,7 +9,14 @@
     "seed:admin": "node scripts/create-admin.js",
     "test": "node test/package-manager.service.test.js"
   },
-  "keywords": ["firebox", "deploy", "docker", "nginx", "pm2", "self-hosted"],
+  "keywords": [
+    "firebox",
+    "deploy",
+    "docker",
+    "nginx",
+    "pm2",
+    "self-hosted"
+  ],
   "author": "Firebox",
   "license": "UNLICENSED",
   "private": true,
@@ -28,6 +35,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.5.0",
     "morgan": "^1.10.0",
+    "multer": "^2.2.0",
     "simple-git": "^3.25.0",
     "socket.io": "^4.7.5",
     "ssh2": "^1.17.0",

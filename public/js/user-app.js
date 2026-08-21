@@ -62,6 +62,47 @@ function renderUserHistory(records) {
 async function loadUserHistory() { await loadWorkspace(); }
 document.getElementById('refreshUserHistory').addEventListener('click', loadUserHistory);
 
+document.querySelectorAll('[data-create]').forEach((choice) => choice.addEventListener('click', () => {
+  document.getElementById('githubCreateForm').style.display = choice.dataset.create === 'github' ? 'block' : 'none';
+  document.getElementById('uploadCreateForm').style.display = choice.dataset.create === 'upload' ? 'block' : 'none';
+}));
+document.querySelectorAll('[data-close-create]').forEach((button) => button.addEventListener('click', () => {
+  document.getElementById('githubCreateForm').style.display = 'none';
+  document.getElementById('uploadCreateForm').style.display = 'none';
+}));
+
+document.getElementById('githubCreateSubmit').addEventListener('click', async () => {
+  const button = document.getElementById('githubCreateSubmit');
+  const message = document.getElementById('githubCreateMessage');
+  button.disabled = true; message.style.display = 'none';
+  try {
+    await userFetch('/api/user/workspace/projects', { method: 'POST', body: JSON.stringify({ name: document.getElementById('githubProjectName').value, repoUrl: document.getElementById('githubRepoUrl').value, branch: document.getElementById('githubBranch').value || 'main', provider: document.getElementById('githubProvider').value }) });
+    showFormMessage('githubCreateMessage', 'GitHub project created in your user workspace.');
+    document.getElementById('githubCreateForm').querySelectorAll('input').forEach((input) => { if (input.id !== 'githubBranch') input.value = ''; });
+    await loadWorkspace();
+  } catch (err) { showFormMessage('githubCreateMessage', err.message, true); } finally { button.disabled = false; }
+});
+
+document.getElementById('uploadCreateSubmit').addEventListener('click', async () => {
+  const button = document.getElementById('uploadCreateSubmit');
+  const message = document.getElementById('uploadCreateMessage');
+  const files = document.getElementById('projectFolder').files;
+  if (!files.length) return showFormMessage('uploadCreateMessage', 'Choose a project folder first.', true);
+  const body = new FormData();
+  body.append('name', document.getElementById('uploadProjectName').value);
+  body.append('provider', document.getElementById('uploadProvider').value);
+  [...files].forEach((file) => body.append('files', file, file.webkitRelativePath || file.name));
+  button.disabled = true; message.style.display = 'none';
+  try {
+    const response = await fetch('/api/user/workspace/projects/upload', { method: 'POST', body });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `Upload failed (${response.status})`);
+    showFormMessage('uploadCreateMessage', `Project created from ${result.uploadedFileCount} uploaded file${result.uploadedFileCount === 1 ? '' : 's'}.`);
+    document.getElementById('uploadProjectName').value = ''; document.getElementById('projectFolder').value = '';
+    await loadWorkspace();
+  } catch (err) { showFormMessage('uploadCreateMessage', err.message, true); } finally { button.disabled = false; }
+});
+
 document.querySelectorAll('.user-provider-card').forEach((card) => card.addEventListener('click', () => {
   document.querySelectorAll('.user-provider-card').forEach((item) => item.classList.remove('selected'));
   card.classList.add('selected');

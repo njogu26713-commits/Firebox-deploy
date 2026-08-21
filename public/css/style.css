@@ -802,3 +802,13 @@ body, .sidebar, .topbar, .card, .btn, input, select, textarea {
 .theme-toggle-inline { padding: 9px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text); cursor: pointer; font: 600 12px var(--font-body); }
 .user-info-card p { color: var(--muted); margin: 8px 0 16px; }
 @media (max-width: 640px) { .panel-heading { flex-direction: column; }.user-form-footer { align-items: stretch; flex-direction: column; }.settings-summary { align-items: flex-start; flex-wrap: wrap; }.settings-summary .theme-toggle-inline { margin-left: 56px; } }
+
+/* ── User project creation ────────────────────────────────────────── */
+.project-create-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.project-create-choice { display: flex; align-items: center; gap: 13px; padding: 18px; border: 1px solid var(--border); color: var(--text); text-align: left; cursor: pointer; transition: border-color .15s, transform .12s, background .15s; }
+.project-create-choice:hover { border-color: var(--ember); background: var(--ember-dim); transform: translateY(-1px); }
+.create-choice-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; background: var(--surface-2); color: var(--ember); font-size: 20px; }
+.project-create-choice > span:nth-child(2) { display: flex; flex-direction: column; gap: 4px; flex: 1; }.project-create-choice strong { font: 600 15px var(--font-display); }.project-create-choice small { color: var(--muted); font-size: 11px; line-height: 1.4; }.create-choice-arrow { color: var(--ember); font-size: 19px; }
+.project-create-form { padding: 20px; margin-bottom: 16px; }.form-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }.form-title strong { font: 600 16px var(--font-display); }
+.project-create-form input[type=file] { padding: 10px; border-style: dashed; cursor: pointer; }
+@media (max-width: 680px) { .project-create-choices { grid-template-columns: 1fr; } }

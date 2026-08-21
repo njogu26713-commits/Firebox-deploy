@@ -9,6 +9,9 @@ const UserWorkspaceSchema = new mongoose.Schema(
       repoUrl: { type: String, required: true, trim: true, maxlength: 500 },
       branch: { type: String, default: 'main', trim: true, maxlength: 120 },
       provider: { type: String, enum: ['railway', 'vercel', 'heroku', 'render'], default: 'railway' },
+      sourceType: { type: String, enum: ['github', 'upload'], default: 'github' },
+      uploadedFileCount: { type: Number, default: 0 },
+      uploadPath: { type: String, default: '' },
       createdAt: { type: Date, default: Date.now },
     }],
     activity: [{

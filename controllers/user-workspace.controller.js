@@ -28,6 +28,22 @@ async function addProject(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function addUploadedProject(req, res, next) {
+  try {
+    const name = String(req.body.name || '').trim().slice(0, 120);
+    const provider = String(req.body.provider || 'railway').trim().toLowerCase();
+    const files = Array.isArray(req.files) ? req.files : [];
+    if (!name || !files.length) return res.status(400).json({ error: 'Project name and at least one folder file are required.' });
+    if (!['railway', 'vercel', 'heroku', 'render'].includes(provider)) return res.status(400).json({ error: 'Unsupported deployment provider.' });
+    const workspace = await UserWorkspace.findOneAndUpdate(
+      { sessionKey: sessionKey(req) },
+      { $setOnInsert: { sessionKey: sessionKey(req) }, $push: { projects: { name, repoUrl: `uploaded://${name}`, branch: 'local', provider, sourceType: 'upload', uploadedFileCount: files.length, uploadPath: files[0].destination || '' } } },
+      { upsert: true, new: true, runValidators: true }
+    ).lean();
+    res.status(201).json({ workspace, uploadedFileCount: files.length });
+  } catch (err) { next(err); }
+}
+
 async function recordDeployment(req, res, next) {
   try {
     const projectName = String(req.body.projectName || '').trim().slice(0, 120);
@@ -43,4 +59,4 @@ async function recordDeployment(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { getWorkspace, addProject, recordDeployment };
+module.exports = { getWorkspace, addProject, addUploadedProject, recordDeployment };
