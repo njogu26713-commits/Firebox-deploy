@@ -199,6 +199,7 @@ async function runDeployPipeline(project, deployment) {
     // existing SSH path remains available for non-Docker projects so current
     // deployments are preserved while the migration is staged safely.
     if (project.type === 'docker' && azureAgent.getConfigStatus().configured) {
+      log('info', 'Using authenticated Azure Agent transport; direct Railway-to-VM SSH is not used.');
       await logger.setStatus(deployment, 'building');
       deployment.status = 'building';
       await runAzureAgentPipeline(project, deployment, log);
