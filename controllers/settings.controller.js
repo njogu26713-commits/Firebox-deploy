@@ -4,6 +4,7 @@ const crypto = require('../services/crypto.service');
 const sshService = require('../services/ssh.service');
 const net = require('net');
 const dns = require('dns').promises;
+const axios = require('axios');
 
 async function getAdminUser(req) {
   const sessionId = req.session?.userId || req.userId;
@@ -79,6 +80,17 @@ async function testOutboundTcp(req, res) {
   res.status(502).json({ ...result, error: result.message });
 }
 
+async function getOutboundIp(req, res) {
+  try {
+    const response = await axios.get('https://api.ipify.org?format=json', { timeout: 8000 });
+    const ip = String(response.data?.ip || '').trim();
+    if (!/^\\d{1,3}(?:\\.\\d{1,3}){3}$/.test(ip)) throw new Error('The public IP service returned an invalid IPv4 address.');
+    res.json({ success: true, ip, message: `Railway outbound IPv4: ${ip}` });
+  } catch (err) {
+    res.status(502).json({ error: `Could not determine Railway outbound IP: ${err.message}` });
+  }
+}
+
 async function saveSshCredentials(req, res) {
   const { host, port, username, privateKey, password, deployRoot } = req.body;
 
@@ -149,6 +161,6 @@ async function deleteGithubToken(req, res) {
 
 module.exports = {
   getSettings,
-  saveSshCredentials, testSshConnection, testOutboundTcp, deleteSshCredentials,
+  saveSshCredentials, testSshConnection, testOutboundTcp, getOutboundIp, deleteSshCredentials,
   saveGithubToken,    deleteGithubToken,
 };

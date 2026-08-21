@@ -110,6 +110,21 @@ document.getElementById('testTcpBtn').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('outboundIpBtn').addEventListener('click', async () => {
+  const button = document.getElementById('outboundIpBtn');
+  button.disabled = true;
+  button.textContent = 'Checking…';
+  try {
+    const result = await apiFetch('/api/settings/ssh-credentials/outbound-ip', { method: 'POST', body: '{}' });
+    showToast(`${result.message}. Allowlist this IP in Azure if required.`, 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Show Railway IP';
+  }
+});
+
 document.getElementById('removeSshBtn').addEventListener('click', async () => {
   if (!confirm('Remove SSH credentials? You will not be able to deploy until you re-add them.')) return;
   try {
