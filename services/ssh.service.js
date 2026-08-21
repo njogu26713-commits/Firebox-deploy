@@ -39,7 +39,7 @@ function connect({ host, port = 22, username, privateKey, password, readyTimeout
       })
       .on('error', fail)
       .on('timeout', () => fail(new Error('SSH socket timed out before the handshake completed')))
-      .connect({ host, port: Number(port), username, privateKey, password, readyTimeout, keepaliveInterval: 10000, keepaliveCountMax: 3 });
+      .connect({ host, port: Number(port), username, privateKey, password, family: 4, readyTimeout, keepaliveInterval: 10000, keepaliveCountMax: 3 });
   });
 }
 

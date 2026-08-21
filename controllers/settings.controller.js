@@ -3,6 +3,7 @@ const config = require('../config/config');
 const crypto = require('../services/crypto.service');
 const sshService = require('../services/ssh.service');
 const net = require('net');
+const dns = require('dns').promises;
 
 async function getAdminUser(req) {
   const sessionId = req.session?.userId || req.userId;
@@ -49,14 +50,26 @@ async function testOutboundTcp(req, res) {
   const host = user.sshHost;
   const port = Number(user.sshPort || 22);
   const startedAt = Date.now();
+  let resolvedAddresses = [];
+  try {
+    resolvedAddresses = (await dns.lookup(host, { all: true })).map((entry) => `${entry.address}/${entry.family}`);
+  } catch (err) {
+    return res.status(502).json({ error: `DNS resolution from Railway failed for ${host}: ${err.code || err.message}`, status: 'failed', host, port });
+  }
   const result = await new Promise((resolve) => {
     let settled = false;
-    const socket = net.createConnection({ host, port, timeout: 10000 });
+    const socket = net.createConnection({ host, port, family: 4, autoSelectFamily: false, timeout: 10000 });
     const finish = (payload) => {
       if (settled) return;
       settled = true;
+      const socketDetails = socket.remoteAddress ? {
+        remoteAddress: socket.remoteAddress,
+        remotePort: socket.remotePort,
+        localAddress: socket.localAddress,
+        localPort: socket.localPort,
+      } : {};
       socket.destroy();
-      resolve({ ...payload, host, port, elapsedMs: Date.now() - startedAt });
+      resolve({ ...payload, host, port, resolvedAddresses, ...socketDetails, elapsedMs: Date.now() - startedAt });
     };
     socket.once('connect', () => finish({ status: 'success', message: `TCP connection from Railway to ${host}:${port}: SUCCESS` }));
     socket.once('timeout', () => finish({ status: 'timeout', message: `TCP connection from Railway to ${host}:${port}: TIMEOUT after 10 seconds` }));
