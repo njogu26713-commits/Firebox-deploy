@@ -92,6 +92,7 @@ app.use('/api/deployments', require('./routes/deployments.routes'));
 app.use('/api/settings',    require('./routes/settings.routes'));
 app.use('/api/github',      require('./routes/github.routes'));
 app.use('/api/azure',       require('./routes/azure.routes'));
+app.use('/api/user/workspace', require('./routes/user-workspace.routes'));
 app.use('/api/deployment-requests', require('./routes/deployment-requests.routes'));
 
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'firebox-deploy', version: '2.0' }));

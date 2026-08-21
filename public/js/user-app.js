@@ -7,6 +7,13 @@ const userSections = {
   settings: ['Settings', 'Manage your workspace preferences.'],
 };
 
+async function userFetch(url, options = {}) {
+  const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `User request failed (${response.status})`);
+  return data;
+}
+
 function showUserSection(name, updateHash = true) {
   if (!userSections[name]) name = 'home';
   document.querySelectorAll('[data-panel]').forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === name));
@@ -21,88 +28,71 @@ function showUserSection(name, updateHash = true) {
 document.querySelectorAll('#userNav [data-section]').forEach((item) => item.addEventListener('click', () => showUserSection(item.dataset.section)));
 document.querySelectorAll('[data-go]').forEach((item) => item.addEventListener('click', () => showUserSection(item.dataset.go)));
 
-async function loadUserIdentity() {
-  try {
-    const { user } = await apiFetch('/api/auth/me');
-    ['userName', 'settingsUserName'].forEach((id) => { const el = document.getElementById(id); if (el) el.textContent = user.name || 'User'; });
-    ['userEmail', 'settingsUserEmail'].forEach((id) => { const el = document.getElementById(id); if (el) el.textContent = user.email || ''; });
-    const { projects } = await apiFetch('/api/projects');
-    document.getElementById('homeProjectCount').textContent = projects.length;
-  } catch (_) {
-    window.location.href = '/login';
-  }
+function setIdentity() {
+  const name = localStorage.getItem('firebox_user_name') || 'Workspace user';
+  const email = localStorage.getItem('firebox_user_email') || 'user workspace';
+  ['userName', 'settingsUserName'].forEach((id) => { const el = document.getElementById(id); if (el) el.textContent = name; });
+  ['userEmail', 'settingsUserEmail'].forEach((id) => { const el = document.getElementById(id); if (el) el.textContent = email; });
 }
 
 function userProjectCard(project) {
-  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">${escapeHtml(project.type || 'Application')}</div></div><div class="beacon" data-status="${escapeHtml(project.status || 'idle')}"><span class="beacon-dot"></span>${escapeHtml(project.status || 'idle')}</div></div><div class="project-domain">${escapeHtml(project.repoUrl || project.githubRepoFullName || 'Repository connected')}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.githubBranch || 'main')}</b></span><span>Updated <b>${timeAgo(project.updatedAt)}</b></span></div></div>`;
+  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">User workspace project</div></div><div class="beacon"><span class="beacon-dot"></span>connected</div></div><div class="project-domain">${escapeHtml(project.repoUrl)}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.branch || 'main')}</b></span><span>Provider <b>${escapeHtml(project.provider || 'railway')}</b></span></div></div>`;
 }
 
-async function loadUserProjects() {
+async function loadWorkspace() {
   try {
-    const { projects } = await apiFetch('/api/projects');
-    const grid = document.getElementById('userProjectsGrid');
-    grid.innerHTML = projects.map(userProjectCard).join('');
+    const { workspace } = await userFetch('/api/user/workspace');
+    const projects = workspace.projects || [];
+    document.getElementById('homeProjectCount').textContent = projects.length;
+    document.getElementById('userProjectsGrid').innerHTML = projects.map(userProjectCard).join('');
     document.getElementById('userProjectsEmpty').style.display = projects.length ? 'none' : 'block';
-  } catch (err) { showToast(err.message, 'error'); }
+    renderUserHistory(workspace.activity || []);
+  } catch (err) {
+    document.getElementById('homeProjectCount').textContent = '0';
+    showToast(err.message, 'error');
+  }
 }
 
-async function loadUserHistory() {
-  try {
-    const { projects } = await apiFetch('/api/projects');
-    const records = [];
-    for (const project of projects) {
-      try {
-        const result = await apiFetch(`/api/projects/${project._id}/deployments`);
-        (result.deployments || []).forEach((deployment) => records.push({ ...deployment, projectName: project.name }));
-      } catch (_) { /* one unavailable history should not block the whole page */ }
-    }
-    records.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    document.getElementById('userHistoryList').innerHTML = records.slice(0, 50).map((record) => `<div class="card history-row"><div class="history-row-icon ${record.status === 'success' ? 'success' : record.status === 'failed' ? 'failed' : ''}">${record.status === 'success' ? '✓' : record.status === 'failed' ? '×' : '↗'}</div><div class="history-row-main"><strong>${escapeHtml(record.projectName)}</strong><span>${escapeHtml(record.trigger || 'Manual deploy')} · ${escapeHtml(record.branch || 'main')}</span></div><div class="history-row-status"><b>${escapeHtml(record.status || 'queued')}</b><small>${timeAgo(record.createdAt)}</small></div></div>`).join('');
-    document.getElementById('userHistoryEmpty').style.display = records.length ? 'none' : 'block';
-  } catch (err) { showToast(err.message, 'error'); }
+async function loadUserProjects() { await loadWorkspace(); }
+function renderUserHistory(records) {
+  const list = document.getElementById('userHistoryList');
+  list.innerHTML = records.slice().reverse().map((record) => `<div class="card history-row"><div class="history-row-icon">↗</div><div class="history-row-main"><strong>${escapeHtml(record.projectName)}</strong><span>User deployment request · ${escapeHtml(record.provider)}</span></div><div class="history-row-status"><b>${escapeHtml(record.status || 'requested')}</b><small>${timeAgo(record.createdAt)}</small></div></div>`).join('');
+  document.getElementById('userHistoryEmpty').style.display = records.length ? 'none' : 'block';
 }
-
+async function loadUserHistory() { await loadWorkspace(); }
 document.getElementById('refreshUserHistory').addEventListener('click', loadUserHistory);
 
 document.querySelectorAll('.user-provider-card').forEach((card) => card.addEventListener('click', () => {
   document.querySelectorAll('.user-provider-card').forEach((item) => item.classList.remove('selected'));
   card.classList.add('selected');
-  document.getElementById('submitDeployRequest').disabled = false;
-  document.getElementById('submitDeployRequest').dataset.provider = card.dataset.provider;
-  document.getElementById('submitDeployRequest').textContent = `Request ${card.dataset.provider[0].toUpperCase() + card.dataset.provider.slice(1)} deployment`;
+  const button = document.getElementById('submitDeployRequest');
+  button.disabled = false;
+  button.dataset.provider = card.dataset.provider;
+  button.textContent = `Request ${card.dataset.provider[0].toUpperCase() + card.dataset.provider.slice(1)} deployment`;
 }));
 
-async function submitRequest(payload, messageId, button) {
-  const message = document.getElementById(messageId);
-  message.style.display = 'none';
-  button.disabled = true;
+function showFormMessage(id, text, error = false) { const el = document.getElementById(id); el.className = error ? 'form-error' : 'form-success'; el.textContent = text; el.style.display = 'inline'; }
+
+document.getElementById('userSourceForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = event.target.querySelector('button'); button.disabled = true;
   try {
-    const response = await fetch('/api/deployment-requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || `Request failed (${response.status})`);
-    message.className = 'form-success';
-    message.textContent = 'Request sent to the admin team.';
-    message.style.display = 'inline';
-  } catch (err) {
-    message.className = 'form-error';
-    message.textContent = err.message;
-    message.style.display = 'inline';
-  } finally { button.disabled = false; }
-}
-
-document.getElementById('userSourceForm').addEventListener('submit', (event) => {
-  event.preventDefault();
-  submitRequest({ requesterName: document.getElementById('userName').textContent, requesterEmail: document.getElementById('userEmail').textContent, projectName: document.getElementById('sourceProjectName').value, provider: 'railway', repoUrl: document.getElementById('sourceRepoUrl').value, branch: document.getElementById('sourceBranch').value || 'main', notes: document.getElementById('sourceNotes').value }, 'sourceFormMessage', event.target.querySelector('button'));
+    await userFetch('/api/user/workspace/projects', { method: 'POST', body: JSON.stringify({ name: document.getElementById('sourceProjectName').value, repoUrl: document.getElementById('sourceRepoUrl').value, branch: document.getElementById('sourceBranch').value || 'main', provider: 'railway' }) });
+    showFormMessage('sourceFormMessage', 'Repository saved in your user workspace.'); event.target.reset(); document.getElementById('sourceBranch').value = 'main'; await loadWorkspace();
+  } catch (err) { showFormMessage('sourceFormMessage', err.message, true); } finally { button.disabled = false; }
 });
 
-document.getElementById('userDeployForm').addEventListener('submit', (event) => {
+document.getElementById('userDeployForm').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const button = document.getElementById('submitDeployRequest');
-  submitRequest({ requesterName: document.getElementById('userName').textContent, requesterEmail: document.getElementById('userEmail').textContent, projectName: document.getElementById('deployProjectName').value, provider: button.dataset.provider, repoUrl: document.getElementById('deployRepoUrl').value, branch: 'main', notes: '' }, 'deployFormMessage', button);
+  const button = document.getElementById('submitDeployRequest'); button.disabled = true;
+  try {
+    await userFetch('/api/user/workspace/deployments', { method: 'POST', body: JSON.stringify({ projectName: document.getElementById('deployProjectName').value, repoUrl: document.getElementById('deployRepoUrl').value, provider: button.dataset.provider }) });
+    showFormMessage('deployFormMessage', 'Deployment request saved in your user workspace.'); event.target.reset(); document.querySelectorAll('.user-provider-card').forEach((item) => item.classList.remove('selected')); button.textContent = 'Choose a provider first'; await loadWorkspace();
+  } catch (err) { showFormMessage('deployFormMessage', err.message, true); } finally { button.disabled = false; }
 });
 
-document.getElementById('logoutBtn').addEventListener('click', async () => { await apiFetch('/api/auth/logout', { method: 'POST' }); localStorage.removeItem('firebox_token'); window.location.href = '/login'; });
-
+document.getElementById('logoutBtn').addEventListener('click', () => { localStorage.removeItem('firebox_user_name'); localStorage.removeItem('firebox_user_email'); window.location.href = '/'; });
+setIdentity();
 const initialSection = window.location.hash.slice(1) || 'home';
 showUserSection(initialSection, false);
-loadUserIdentity();
+loadWorkspace();

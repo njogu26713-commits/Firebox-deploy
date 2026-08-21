@@ -1,0 +1,24 @@
+const mongoose = require('mongoose');
+
+const UserWorkspaceSchema = new mongoose.Schema(
+  {
+    sessionKey: { type: String, required: true, unique: true, index: true },
+    displayName: { type: String, default: 'User workspace', trim: true, maxlength: 120 },
+    projects: [{
+      name: { type: String, required: true, trim: true, maxlength: 120 },
+      repoUrl: { type: String, required: true, trim: true, maxlength: 500 },
+      branch: { type: String, default: 'main', trim: true, maxlength: 120 },
+      provider: { type: String, enum: ['railway', 'vercel', 'heroku', 'render'], default: 'railway' },
+      createdAt: { type: Date, default: Date.now },
+    }],
+    activity: [{
+      projectName: { type: String, required: true, trim: true, maxlength: 120 },
+      provider: { type: String, required: true, trim: true, maxlength: 30 },
+      status: { type: String, default: 'requested', trim: true, maxlength: 30 },
+      createdAt: { type: Date, default: Date.now },
+    }],
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model('UserWorkspace', UserWorkspaceSchema);
