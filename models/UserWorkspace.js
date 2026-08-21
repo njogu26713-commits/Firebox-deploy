@@ -16,6 +16,8 @@ const UserWorkspaceSchema = new mongoose.Schema(
       sourceType: { type: String, enum: ['github', 'upload'], default: 'github' },
       uploadedFileCount: { type: Number, default: 0 },
       uploadPath: { type: String, default: '' },
+      deploymentProjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project' },
+      lastDeploymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deployment' },
       createdAt: { type: Date, default: Date.now },
     }],
     activity: [{

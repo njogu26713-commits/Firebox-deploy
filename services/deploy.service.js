@@ -82,6 +82,8 @@ async function runDeployPipeline(project, deployment) {
     // ── Step 1: Connect ──────────────────────────────────────────────────
     const creds = await getSshCredentials(project);
     const deployPath = resolveDeployPath(project, creds);
+    const githubToken = project.githubToken ? cryptoSvc.decrypt(project.githubToken) : '';
+    const gitCommand = githubToken ? `git -c http.extraheader=${shellQuote(`AUTHORIZATION: bearer ${githubToken}`)}` : 'git';
 
     log('info', `[1/4] Connecting to ${creds.host}:${creds.port} as ${creds.username}…`);
     conn = await sshSvc.connect({
@@ -104,9 +106,9 @@ async function runDeployPipeline(project, deployment) {
       log('info', `[2/4] Repository found at ${deployPath} — running git pull…`);
       const pullCmd = [
         `cd ${deployPath}`,
-        `git fetch origin`,
-        `git checkout ${project.githubBranch || 'main'}`,
-        `git pull origin ${project.githubBranch || 'main'}`,
+        `${gitCommand} fetch origin`,
+        `${gitCommand} checkout ${project.githubBranch || 'main'}`,
+        `${gitCommand} pull origin ${project.githubBranch || 'main'}`,
       ].join(' && ');
 
       const { code: pullCode } = await sshSvc.exec(
@@ -123,7 +125,7 @@ async function runDeployPipeline(project, deployment) {
       const parentDir = deployPath.substring(0, deployPath.lastIndexOf('/'));
       await sshSvc.exec(conn, `mkdir -p ${parentDir}`);
 
-      const cloneCmd = `git clone --branch ${project.githubBranch || 'main'} ${project.repoUrl} ${deployPath}`;
+      const cloneCmd = `${gitCommand} clone --branch ${project.githubBranch || 'main'} ${project.repoUrl} ${deployPath}`;
       const { code: cloneCode } = await sshSvc.exec(
         conn, cloneCmd,
         (line) => log('info', line),

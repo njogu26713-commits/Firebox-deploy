@@ -17,6 +17,8 @@ router.get('/github/oauth/start', githubCtrl.startOAuth);
 router.get('/github/oauth/callback', githubCtrl.oauthCallback);
 router.put('/github-connection', ctrl.saveGithubConnection);
 router.post('/projects', ctrl.addProject);
+router.post('/projects/:projectId/deploy', ctrl.deployProject);
+router.get('/projects/:projectId/deployments/:deploymentId', ctrl.getDeploymentStatus);
 router.post('/projects/upload', upload.array('files', 500), ctrl.addUploadedProject);
 router.post('/deployments', ctrl.recordDeployment);
 

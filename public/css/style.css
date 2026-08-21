@@ -819,3 +819,6 @@ body, .sidebar, .topbar, .card, .btn, input, select, textarea {
 /* ── GitHub auth method choices ───────────────────────────────────── */
 .github-auth-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }.github-auth-choice { display: flex; flex-direction: column; gap: 5px; padding: 15px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; }.github-auth-choice:hover { border-color: var(--ember); background: var(--ember-dim); }.github-auth-choice strong { font: 600 14px var(--font-display); }.github-auth-choice small, .github-oauth-hint { color: var(--muted); font-size: 11px; line-height: 1.45; }.github-oauth-hint { padding: 10px 12px; margin-bottom: 14px; border-left: 2px solid var(--ember); background: var(--surface-2); }
 @media (max-width: 640px) { .github-auth-choices { grid-template-columns: 1fr; } }
+
+/* ── User immediate VPS deployment ────────────────────────────────── */
+.project-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--border); }.project-upload-note { font-size: 11px; }.user-deploy-project { white-space: nowrap; }

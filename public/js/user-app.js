@@ -36,8 +36,28 @@ function setIdentity() {
 }
 
 function userProjectCard(project) {
-  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">User workspace project</div></div><div class="beacon"><span class="beacon-dot"></span>connected</div></div><div class="project-domain">${escapeHtml(project.repoUrl)}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.branch || 'main')}</b></span><span>Provider <b>${escapeHtml(project.provider || 'railway')}</b></span></div></div>`;
+  const deployable = project.sourceType !== 'upload';
+  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">User workspace project</div></div><div class="beacon"><span class="beacon-dot"></span>connected</div></div><div class="project-domain">${escapeHtml(project.repoUrl)}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.branch || 'main')}</b></span><span>Provider <b>Firebox VPS</b></span></div><div class="project-card-actions">${deployable ? `<button class="btn btn-primary btn-sm user-deploy-project" data-project-id="${project._id}">Deploy this project →</button>` : '<span class="text-muted project-upload-note">Connect GitHub to deploy</span>'}</div></div>`;
 }
+
+async function deployUserProject(projectId, button) {
+  button.disabled = true; button.textContent = 'Starting deployment…';
+  try {
+    const result = await userFetch(`/api/user/workspace/projects/${projectId}/deploy`, { method: 'POST' });
+    showToast(result.message || 'Deployment started on the Firebox Deploy VPS.', 'success');
+    button.textContent = 'Deployment started';
+    await loadWorkspace();
+  } catch (err) { showToast(err.message, 'error'); button.disabled = false; button.textContent = 'Deploy this project →'; }
+}
+
+function bindDeployButtons(container) {
+  container.addEventListener('click', (event) => {
+    const button = event.target.closest('.user-deploy-project');
+    if (button) deployUserProject(button.dataset.projectId, button);
+  });
+}
+bindDeployButtons(document.getElementById('userProjectsGrid'));
+bindDeployButtons(document.getElementById('userDeployGrid'));
 
 async function loadWorkspace() {
   try {
@@ -45,7 +65,9 @@ async function loadWorkspace() {
     const projects = workspace.projects || [];
     document.getElementById('homeProjectCount').textContent = projects.length;
     document.getElementById('userProjectsGrid').innerHTML = projects.map(userProjectCard).join('');
+    document.getElementById('userDeployGrid').innerHTML = projects.filter((project) => project.sourceType !== 'upload').map(userProjectCard).join('');
     document.getElementById('userProjectsEmpty').style.display = projects.length ? 'none' : 'block';
+    document.getElementById('userDeployEmpty').style.display = projects.some((project) => project.sourceType !== 'upload') ? 'none' : 'block';
     renderUserHistory(workspace.activity || []);
   } catch (err) {
     document.getElementById('homeProjectCount').textContent = '0';

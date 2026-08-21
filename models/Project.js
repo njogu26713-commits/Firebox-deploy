@@ -25,6 +25,7 @@ const ProjectSchema = new mongoose.Schema(
     githubRepoFullName: { type: String, default: '' }, // "owner/repo"
     githubBranch:       { type: String, default: 'main' },
     repoUrl:            { type: String, required: true },
+    githubToken:        { type: String, default: '' }, // encrypted source-control token
 
     // ── Build config ─────────────────────────────────────────────────────
     rootDirectory: { type: String, default: '.' },
