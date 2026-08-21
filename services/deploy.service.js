@@ -81,7 +81,15 @@ function agentRepositoryRef(project) {
   return [match[1], match[2]];
 }
 
+function configuredTransportMode() {
+  const mode = String(process.env.FIREBOX_DEPLOY_TRANSPORT || 'auto').trim().toLowerCase();
+  return ['auto', 'azure-agent', 'ssh'].includes(mode) ? mode : 'auto';
+}
+
 async function shouldUseAzureAgent(project) {
+  const mode = configuredTransportMode();
+  if (mode === 'ssh') return false;
+  if (mode === 'azure-agent' && !azureAgent.getConfigStatus().configured) throw new Error('FIREBOX_DEPLOY_TRANSPORT=azure-agent requires FIREBOX_AZURE_AGENT_URL and FIREBOX_AZURE_AGENT_SECRET.');
   if (!azureAgent.getConfigStatus().configured) return false;
   if (project.type === 'docker') return true;
   if (!project.githubToken) return false;
@@ -212,6 +220,7 @@ async function runDeployPipeline(project, deployment) {
     // existing SSH path remains available for non-Docker projects so current
     // deployments are preserved while the migration is staged safely.
     const useAzureAgent = await shouldUseAzureAgent(project);
+    if (configuredTransportMode() === 'azure-agent' && !useAzureAgent) throw new Error('Azure Agent transport is enabled, but the selected repository does not contain a supported Dockerfile. Direct SSH fallback is disabled.');
     if (useAzureAgent) {
       log('info', 'Using authenticated Azure Agent transport; direct Railway-to-VM SSH is not used.');
       await logger.setStatus(deployment, 'building');

@@ -84,7 +84,7 @@ async function testOutboundTcp(req, res) {
 async function testAzureAgentConnection(req, res) {
   try {
     const health = await azureAgent.health();
-    res.json({ success: true, connected: true, service: health.service, status: health.status });
+    res.json({ success: true, connected: true, service: health.service, status: health.status, transport: process.env.FIREBOX_DEPLOY_TRANSPORT || 'auto', revision: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.RAILWAY_GIT_COMMIT || 'unknown' });
   } catch (err) {
     res.status(err.statusCode || 502).json({ success: false, connected: false, error: err.message });
   }
