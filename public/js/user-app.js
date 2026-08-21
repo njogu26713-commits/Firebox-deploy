@@ -114,12 +114,35 @@ document.querySelectorAll('.user-provider-card').forEach((card) => card.addEvent
 
 function showFormMessage(id, text, error = false) { const el = document.getElementById(id); el.className = error ? 'form-error' : 'form-success'; el.textContent = text; el.style.display = 'inline'; }
 
-document.getElementById('userSourceForm').addEventListener('submit', async (event) => {
+async function loadGithubConnection() {
+  try {
+    const connection = await userFetch('/api/user/workspace/github-connection');
+    const dot = document.getElementById('githubStatusDot');
+    document.getElementById('githubStatusTitle').textContent = connection.connected ? `GitHub connected as ${connection.username}` : 'GitHub is not connected';
+    document.getElementById('githubStatusText').textContent = connection.connected ? 'You can now import an existing repository.' : 'Add your GitHub username and personal access token to continue.';
+    dot.classList.toggle('connected', connection.connected);
+    document.getElementById('connectedGithubImport').style.display = connection.connected ? 'block' : 'none';
+    if (connection.connected) document.getElementById('githubUsername').value = connection.username;
+  } catch (err) { showFormMessage('githubConnectionMessage', err.message, true); }
+}
+
+document.getElementById('githubConnectionForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = event.target.querySelector('button'); button.disabled = true;
   try {
-    await userFetch('/api/user/workspace/projects', { method: 'POST', body: JSON.stringify({ name: document.getElementById('sourceProjectName').value, repoUrl: document.getElementById('sourceRepoUrl').value, branch: document.getElementById('sourceBranch').value || 'main', provider: 'railway' }) });
-    showFormMessage('sourceFormMessage', 'Repository saved in your user workspace.'); event.target.reset(); document.getElementById('sourceBranch').value = 'main'; await loadWorkspace();
+    await userFetch('/api/user/workspace/github-connection', { method: 'PUT', body: JSON.stringify({ username: document.getElementById('githubUsername').value, token: document.getElementById('githubToken').value }) });
+    document.getElementById('githubToken').value = '';
+    showFormMessage('githubConnectionMessage', 'GitHub connected securely.');
+    await loadGithubConnection();
+  } catch (err) { showFormMessage('githubConnectionMessage', err.message, true); } finally { button.disabled = false; }
+});
+
+document.getElementById('sourceImportSubmit').addEventListener('click', async () => {
+  const button = document.getElementById('sourceImportSubmit'); button.disabled = true;
+  try {
+    await userFetch('/api/user/workspace/projects', { method: 'POST', body: JSON.stringify({ name: document.getElementById('sourceProjectName').value, repoUrl: document.getElementById('sourceRepoUrl').value, branch: document.getElementById('sourceBranch').value || 'main', provider: document.getElementById('sourceProvider').value }) });
+    showFormMessage('sourceFormMessage', 'GitHub project imported into your user workspace.');
+    await loadWorkspace();
   } catch (err) { showFormMessage('sourceFormMessage', err.message, true); } finally { button.disabled = false; }
 });
 
@@ -134,6 +157,7 @@ document.getElementById('userDeployForm').addEventListener('submit', async (even
 
 document.getElementById('logoutBtn').addEventListener('click', async () => { await userFetch('/api/user-auth/logout', { method: 'POST' }); localStorage.removeItem('firebox_user_name'); localStorage.removeItem('firebox_user_email'); window.location.href = '/'; });
 setIdentity();
+loadGithubConnection();
 const initialSection = window.location.hash.slice(1) || 'home';
 showUserSection(initialSection, false);
 loadWorkspace();

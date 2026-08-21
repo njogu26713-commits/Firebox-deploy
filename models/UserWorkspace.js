@@ -4,6 +4,9 @@ const UserWorkspaceSchema = new mongoose.Schema(
   {
     sessionKey: { type: String, required: true, unique: true, index: true },
     displayName: { type: String, default: 'User workspace', trim: true, maxlength: 120 },
+    githubUsername: { type: String, default: '', trim: true, maxlength: 120 },
+    githubToken: { type: String, default: '' },
+    githubConnectedAt: { type: Date },
     projects: [{
       name: { type: String, required: true, trim: true, maxlength: 120 },
       repoUrl: { type: String, required: true, trim: true, maxlength: 500 },

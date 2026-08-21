@@ -1,4 +1,5 @@
 const UserWorkspace = require('../models/UserWorkspace');
+const { encrypt } = require('../services/crypto.service');
 
 function sessionKey(req) {
   return `user:${req.userAccountId}`;
@@ -8,6 +9,27 @@ async function getWorkspace(req, res, next) {
   try {
     const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) }).lean();
     res.json({ workspace: workspace || { projects: [], activity: [] } });
+  } catch (err) { next(err); }
+}
+
+async function getGithubConnection(req, res, next) {
+  try {
+    const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) }).lean();
+    res.json({ connected: !!(workspace && workspace.githubToken), username: workspace?.githubUsername || '', connectedAt: workspace?.githubConnectedAt || null });
+  } catch (err) { next(err); }
+}
+
+async function saveGithubConnection(req, res, next) {
+  try {
+    const username = String(req.body.username || '').trim().slice(0, 120);
+    const token = String(req.body.token || '').trim();
+    if (!username || !token) return res.status(400).json({ error: 'GitHub username and personal access token are required.' });
+    const workspace = await UserWorkspace.findOneAndUpdate(
+      { sessionKey: sessionKey(req) },
+      { $set: { githubUsername: username, githubToken: encrypt(token), githubConnectedAt: new Date() }, $setOnInsert: { sessionKey: sessionKey(req) } },
+      { upsert: true, new: true, runValidators: true }
+    ).lean();
+    res.json({ connected: true, username: workspace.githubUsername, connectedAt: workspace.githubConnectedAt });
   } catch (err) { next(err); }
 }
 
@@ -59,4 +81,4 @@ async function recordDeployment(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { getWorkspace, addProject, addUploadedProject, recordDeployment };
+module.exports = { getWorkspace, getGithubConnection, saveGithubConnection, addProject, addUploadedProject, recordDeployment };

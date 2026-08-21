@@ -11,6 +11,8 @@ const upload = multer({ dest: uploadRoot, limits: { files: 500, fileSize: 20 * 1
 router.use(requireUserAuth);
 
 router.get('/', ctrl.getWorkspace);
+router.get('/github-connection', ctrl.getGithubConnection);
+router.put('/github-connection', ctrl.saveGithubConnection);
 router.post('/projects', ctrl.addProject);
 router.post('/projects/upload', upload.array('files', 500), ctrl.addUploadedProject);
 router.post('/deployments', ctrl.recordDeployment);
