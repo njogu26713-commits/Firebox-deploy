@@ -171,7 +171,10 @@ async function deployProject(req, res, next) {
     const requestedTarget = String(req.body.deploymentTarget || project.deploymentTarget || 'azure-agent').trim().toLowerCase();
     if (!['azure-agent', 'ssh'].includes(requestedTarget)) return res.status(400).json({ error: 'Unsupported deployment target.' });
     const deploymentTarget = requestedTarget;
-    if (deploymentTarget === 'azure-agent' && !azureAgent.getConfigStatus().configured) return res.status(503).json({ error: 'The Azure Agent target is selected, but FIREBOX_AZURE_AGENT_URL or FIREBOX_AZURE_AGENT_SECRET is missing in Railway.' });
+    if (deploymentTarget === 'azure-agent') {
+      const agentConfig = azureAgent.getConfigStatus();
+      if (!agentConfig.configured) return res.status(503).json({ error: `The Azure Agent target is selected, but the running Firebox service cannot use its configuration (URL ${agentConfig.urlConfigured ? 'present' : 'missing'}, secret ${agentConfig.secretConfigured ? 'present' : 'missing'}). Restart or redeploy the Railway service after checking its Variables.` });
+    }
     if (deploymentTarget === 'ssh' && (!admin.sshHost || !admin.sshUsername || (!admin.sshPrivateKey && !admin.sshPassword))) return res.status(503).json({ error: 'The admin must configure VPS SSH credentials in the admin Settings page first.' });
     const githubMatch = String(project.repoUrl || '').match(/^https?:\/\/github\.com\/([^/]+)\/([^/#]+)(?:\.git)?(?:[#?].*)?$/i);
     if (!githubMatch) return res.status(400).json({ error: 'A GitHub repository is required for VPS deployment.' });

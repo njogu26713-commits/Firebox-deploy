@@ -2,9 +2,25 @@ const axios = require('axios');
 
 const DEFAULT_TIMEOUT_MS = 15000;
 
+function cleanEnvValue(value) {
+  const text = String(value || '').trim();
+  if (text.length >= 2 && ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'")))) return text.slice(1, -1).trim();
+  return text;
+}
+
+function firstEnv(names) {
+  for (const name of names) {
+    const value = cleanEnvValue(process.env[name]);
+    if (value) return { value, source: name };
+  }
+  return { value: '', source: null };
+}
+
 function getConfig() {
-  const baseUrl = String(process.env.FIREBOX_AZURE_AGENT_URL || '').trim().replace(/\/$/, '');
-  const secret = String(process.env.FIREBOX_AZURE_AGENT_SECRET || '').trim();
+  const urlConfig = firstEnv(['FIREBOX_AZURE_AGENT_URL', 'AZURE_AGENT_URL', 'FIREBOX_AGENT_URL', 'AGENT_URL']);
+  const secretConfig = firstEnv(['FIREBOX_AZURE_AGENT_SECRET', 'AZURE_AGENT_SECRET', 'FIREBOX_AGENT_SECRET', 'AGENT_SECRET']);
+  const baseUrl = urlConfig.value.replace(/\/$/, '');
+  const secret = secretConfig.value;
   if (!baseUrl || !secret) {
     const error = new Error('Azure Agent is not configured. Set FIREBOX_AZURE_AGENT_URL and FIREBOX_AZURE_AGENT_SECRET.');
     error.code = 'AZURE_AGENT_NOT_CONFIGURED';
@@ -92,6 +108,13 @@ module.exports = {
   jobStatus: (jobId) => request('job status', 'GET', `/api/jobs/${encode(jobId)}`),
   jobLogs: (jobId) => request('job logs', 'GET', `/api/jobs/${encode(jobId)}/logs`),
   getConfigStatus: () => {
-    try { getConfig(); return { configured: true }; } catch (error) { return { configured: false, code: error.code, message: error.message }; }
+    const urlConfig = firstEnv(['FIREBOX_AZURE_AGENT_URL', 'AZURE_AGENT_URL', 'FIREBOX_AGENT_URL', 'AGENT_URL']);
+    const secretConfig = firstEnv(['FIREBOX_AZURE_AGENT_SECRET', 'AZURE_AGENT_SECRET', 'FIREBOX_AGENT_SECRET', 'AGENT_SECRET']);
+    try {
+      getConfig();
+      return { configured: true, urlConfigured: true, secretConfigured: true, urlSource: urlConfig.source, secretSource: secretConfig.source };
+    } catch (error) {
+      return { configured: false, urlConfigured: !!urlConfig.value, secretConfigured: !!secretConfig.value, urlSource: urlConfig.source, secretSource: secretConfig.source, code: error.code, message: error.message };
+    }
   },
 };
