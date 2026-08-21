@@ -609,3 +609,56 @@ input.field-detected {
   .topbar h1   { font-size: 15px; }
   .content     { padding: 12px 10px 80px; }
 }
+
+/* ── Theme switching ──────────────────────────────────────────────── */
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #F4F6F8;
+  --surface: #FFFFFF;
+  --surface-2: #EEF1F4;
+  --surface-3: #E2E7EC;
+  --border: #D6DDE5;
+  --text: #17212B;
+  --muted: #5E6B78;
+  --muted-2: #82909D;
+  --ember-dim: #FFD9C9;
+  --teal-dim: #C9F4ED;
+}
+
+html[data-theme="light"] .topbar {
+  background: rgba(244, 246, 248, .88);
+}
+
+html[data-theme="light"] .brand-mark {
+  box-shadow: 0 0 18px rgba(255, 90, 31, .2);
+}
+
+body, .sidebar, .topbar, .card, .btn, input, select, textarea {
+  transition: background-color .2s ease, color .2s ease, border-color .2s ease;
+}
+
+.theme-toggle {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .16);
+  cursor: pointer;
+  font: 600 12px var(--font-body);
+  transition: transform .12s ease, background-color .2s ease, color .2s ease, border-color .2s ease;
+}
+.theme-toggle:hover { background: var(--surface-2); transform: translateY(-1px); }
+.theme-toggle:active { transform: translateY(0) scale(.98); }
+.theme-toggle-icon { font-size: 15px; line-height: 1; }
+
+@media (max-width: 640px) {
+  .theme-toggle { right: 14px; bottom: 14px; }
+}
