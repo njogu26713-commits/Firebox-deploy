@@ -219,8 +219,9 @@ async function runDeployPipeline(project, deployment) {
     // Docker projects use the authenticated HTTPS agent when configured. The
     // existing SSH path remains available for non-Docker projects so current
     // deployments are preserved while the migration is staged safely.
-    const useAzureAgent = await shouldUseAzureAgent(project);
-    if (configuredTransportMode() === 'azure-agent' && !useAzureAgent) throw new Error('Azure Agent transport is enabled, but the selected repository does not contain a supported Dockerfile. Direct SSH fallback is disabled.');
+    const deploymentTarget = project.deploymentTarget || (configuredTransportMode() === 'ssh' ? 'ssh' : 'azure-agent');
+    const useAzureAgent = deploymentTarget === 'azure-agent' ? await shouldUseAzureAgent(project) : false;
+    if (deploymentTarget === 'azure-agent' && !useAzureAgent) throw new Error('Azure Agent target is selected, but the repository does not contain a supported Dockerfile or the Agent is not configured. Direct SSH fallback is disabled.');
     if (useAzureAgent) {
       log('info', 'Using authenticated Azure Agent transport; direct Railway-to-VM SSH is not used.');
       await logger.setStatus(deployment, 'building');
@@ -235,7 +236,8 @@ async function runDeployPipeline(project, deployment) {
       return;
     }
 
-    if (azureAgent.getConfigStatus().configured) log('info', `Azure Agent not selected for stored runtime ${project.type || 'unknown'}; using legacy SSH transport.`);
+    if (deploymentTarget === 'azure-agent') throw new Error('Azure Agent target is selected, but direct SSH fallback is disabled.');
+    if (azureAgent.getConfigStatus().configured) log('info', `SSH target selected explicitly for stored runtime ${project.type || 'unknown'}; using legacy SSH transport.`);
     const creds = await getSshCredentials(project);
     const deployPath = resolveDeployPath(project, creds);
     const githubToken = project.githubToken ? cryptoSvc.decrypt(project.githubToken) : '';

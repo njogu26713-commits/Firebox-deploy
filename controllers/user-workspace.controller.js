@@ -119,8 +119,11 @@ async function deployProject(req, res, next) {
     const admin = await User.findOne({ $or: [{ email: config.adminEmail.toLowerCase() }, { role: 'owner' }] });
     if (!admin) return res.status(503).json({ error: 'Admin deployment settings are not configured.' });
     const projectType = (project.detectedFiles || []).includes('Dockerfile') ? 'docker' : 'node-app';
-    const agentConfigured = projectType === 'docker' && azureAgent.getConfigStatus().configured;
-    if (!agentConfigured && (!admin.sshHost || !admin.sshUsername || (!admin.sshPrivateKey && !admin.sshPassword))) return res.status(503).json({ error: 'The admin must configure VPS SSH credentials in the admin Settings page first, or configure the Azure Agent for Docker deployments.' });
+    const requestedTarget = String(req.body.deploymentTarget || project.deploymentTarget || 'azure-agent').trim().toLowerCase();
+    if (!['azure-agent', 'ssh'].includes(requestedTarget)) return res.status(400).json({ error: 'Unsupported deployment target.' });
+    const deploymentTarget = requestedTarget;
+    if (deploymentTarget === 'azure-agent' && !azureAgent.getConfigStatus().configured) return res.status(503).json({ error: 'The Azure Agent target is selected, but FIREBOX_AZURE_AGENT_URL or FIREBOX_AZURE_AGENT_SECRET is missing in Railway.' });
+    if (deploymentTarget === 'ssh' && (!admin.sshHost || !admin.sshUsername || (!admin.sshPrivateKey && !admin.sshPassword))) return res.status(503).json({ error: 'The admin must configure VPS SSH credentials in the admin Settings page first.' });
     const githubMatch = String(project.repoUrl || '').match(/^https?:\/\/github\.com\/([^/]+)\/([^/#]+)(?:\.git)?(?:[#?].*)?$/i);
     if (!githubMatch) return res.status(400).json({ error: 'A GitHub repository is required for VPS deployment.' });
     try {
@@ -134,10 +137,11 @@ async function deployProject(req, res, next) {
       let slug = `user-${baseSlug}`;
       let suffix = 1;
       while (await Project.exists({ slug })) { slug = `user-${baseSlug}-${suffix++}`; }
-      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: projectType, githubRepoFullName: `${githubMatch[1]}/${githubMatch[2]}`, repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
+      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: projectType, deploymentTarget, githubRepoFullName: `${githubMatch[1]}/${githubMatch[2]}`, repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
       project.deploymentProjectId = deploymentProject._id;
     } else {
       deploymentProject.type = projectType;
+      deploymentProject.deploymentTarget = deploymentTarget;
       deploymentProject.repoUrl = project.repoUrl;
       deploymentProject.githubRepoFullName = `${githubMatch[1]}/${githubMatch[2]}`;
       deploymentProject.githubBranch = project.branch || 'main';
@@ -148,9 +152,9 @@ async function deployProject(req, res, next) {
     }
     const { deploymentId } = await deployService.triggerDeploy(deploymentProject, 'manual');
     project.lastDeploymentId = deploymentId;
-    workspace.activity.push({ projectName: project.name, provider: 'vps', status: 'queued' });
+    workspace.activity.push({ projectName: project.name, provider: deploymentTarget === 'azure-agent' ? 'azure-agent' : 'vps', status: 'queued' });
     await workspace.save();
-    res.status(202).json({ deploymentId, status: 'queued', message: 'Deployment started on the Firebox Deploy VPS.' });
+    res.status(202).json({ deploymentId, status: 'queued', target: deploymentTarget, message: deploymentTarget === 'azure-agent' ? 'Deployment queued through the Azure Agent HTTPS bridge.' : 'Deployment started on the Firebox Deploy VPS.' });
   } catch (err) { next(err); }
 }
 

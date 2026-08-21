@@ -44,7 +44,7 @@ function setIdentity() {
 function userProjectCard(project) {
   const deployable = project.sourceType !== 'upload';
   const currentStatus = project.lastDeploymentId ? 'Deploy again' : 'Deploy this project';
-  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">${escapeHtml(project.framework || 'User workspace project')}</div></div><div class="beacon"><span class="beacon-dot"></span>${escapeHtml(project.lastDeploymentId ? 'deployment available' : 'connected')}</div></div><div class="project-domain">${escapeHtml(project.repoUrl)}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.branch || 'main')}</b></span><span>Provider <b>Firebox VPS</b></span></div><div class="project-card-actions">${deployable ? `<button class="btn btn-primary btn-sm user-deploy-project" data-project-id="${project._id}">${currentStatus} →</button>` : '<span class="text-muted project-upload-note">Connect GitHub to deploy</span>'}</div></div>`;
+  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">${escapeHtml(project.framework || 'User workspace project')}</div></div><div class="beacon"><span class="beacon-dot"></span>${escapeHtml(project.lastDeploymentId ? 'deployment available' : 'connected')}</div></div><div class="project-domain">${escapeHtml(project.repoUrl)}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.branch || 'main')}</b></span><span>Target <b>Azure Agent HTTPS</b></span></div><div class="project-card-actions">${deployable ? `<button class="btn btn-primary btn-sm user-deploy-project" data-project-id="${project._id}" data-target="azure-agent">${currentStatus} →</button>` : '<span class="text-muted project-upload-note">Connect GitHub to deploy</span>'}</div></div>`;
 }
 
 function showUserDeploymentConsole(project, deploymentId, status = 'queued') {
@@ -54,7 +54,7 @@ function showUserDeploymentConsole(project, deploymentId, status = 'queued') {
   consoleEl.style.display = 'block';
   document.getElementById('userDeploymentTitle').textContent = `Deployment #${deploymentId} · ${project?.name || 'Project'}`;
   document.getElementById('userDeploymentStatus').textContent = status;
-  document.getElementById('userDeploymentSummary').innerHTML = `Repository: <strong>${escapeHtml(project?.repoUrl || '—')}</strong><br>Branch: <strong>${escapeHtml(project?.branch || 'main')}</strong><br>Server: <strong>firebox-server</strong>`;
+  document.getElementById('userDeploymentSummary').innerHTML = `Repository: <strong>${escapeHtml(project?.repoUrl || '—')}</strong><br>Branch: <strong>${escapeHtml(project?.branch || 'main')}</strong><br>Target: <strong>Azure Agent HTTPS</strong><br>Bridge: <strong>agent.firebox.live</strong>`;
   if (hydratedUserDeploymentId !== activeUserDeploymentId) {
     document.getElementById('userDeploymentTerminal').textContent = '';
     document.getElementById('userDeploymentResult').style.display = 'none';
@@ -93,11 +93,12 @@ function updateUserDeploymentStatus(status, deployment = {}) {
 async function deployUserProject(projectId, button) {
   button.disabled = true; button.textContent = 'Creating deployment…';
   try {
-    const result = await userFetch(`/api/user/workspace/projects/${projectId}/deploy`, { method: 'POST' });
+    const result = await userFetch(`/api/user/workspace/projects/${projectId}/deploy`, { method: 'POST', body: JSON.stringify({ deploymentTarget: button.dataset.target || 'azure-agent' }) });
     const project = (window.fireboxUserProjects || []).find((item) => String(item._id) === String(projectId)) || { _id: projectId };
     showUserDeploymentConsole(project, result.deploymentId, result.status || 'queued');
+    appendUserDeploymentLog({ level: 'info', message: 'Target: Azure Agent HTTPS → https://agent.firebox.live', ts: new Date() });
     fireboxSocket.emit('subscribe:deployment', String(result.deploymentId));
-    appendUserDeploymentLog({ level: 'info', message: `Deployment ${result.deploymentId} queued. The VPS pipeline is starting.`, ts: new Date() });
+    appendUserDeploymentLog({ level: 'info', message: `Deployment ${result.deploymentId} queued. FireboxDeploy is calling the Azure Agent over HTTPS.`, ts: new Date() });
     updateUserDeploymentStatus('queued');
     button.textContent = 'Deployment queued';
     await loadWorkspace();

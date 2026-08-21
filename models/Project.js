@@ -20,6 +20,11 @@ const ProjectSchema = new mongoose.Schema(
       enum: ['api', 'website', 'bot-whatsapp', 'bot-telegram', 'bot-discord', 'node-app', 'docker'],
       default: 'node-app',
     },
+    deploymentTarget: {
+      type: String,
+      enum: ['azure-agent', 'ssh'],
+      default: 'ssh',
+    },
 
     // ── Source ───────────────────────────────────────────────────────────
     githubRepoFullName: { type: String, default: '' }, // "owner/repo"
