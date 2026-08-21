@@ -82,10 +82,12 @@ async function testOutboundTcp(req, res) {
 
 async function getOutboundIp(req, res) {
   try {
-    const response = await axios.get('https://api.ipify.org?format=json', { timeout: 8000 });
-    const ip = String(response.data?.ip || '').trim();
-    if (!/^\\d{1,3}(?:\\.\\d{1,3}){3}$/.test(ip)) throw new Error('The public IP service returned an invalid IPv4 address.');
-    res.json({ success: true, ip, message: `Railway outbound IPv4: ${ip}` });
+    const response = await axios.get('https://api4.ipify.org?format=json', { timeout: 8000 });
+    const body = response.data;
+    const ip = String(typeof body === 'string' ? body : body?.ip || '').trim();
+    const family = net.isIP(ip);
+    if (family !== 4) throw new Error(`The public IP service returned ${family === 6 ? 'IPv6' : 'an invalid address'}: ${JSON.stringify(body)}`);
+    res.json({ success: true, ip, family, message: `Railway outbound IPv4: ${ip}` });
   } catch (err) {
     res.status(502).json({ error: `Could not determine Railway outbound IP: ${err.message}` });
   }
