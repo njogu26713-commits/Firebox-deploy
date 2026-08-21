@@ -17,7 +17,7 @@ const ProjectSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ['api', 'website', 'bot-whatsapp', 'bot-telegram', 'bot-discord', 'node-app'],
+      enum: ['api', 'website', 'bot-whatsapp', 'bot-telegram', 'bot-discord', 'node-app', 'docker'],
       default: 'node-app',
     },
 
@@ -49,6 +49,8 @@ const ProjectSchema = new mongoose.Schema(
 
     // ── Custom domain (manually configured) ──────────────────────────────
     customDomain: { type: String, default: '' },
+    vpsPort: { type: Number, default: 3000, min: 1, max: 65535 },
+    healthPath: { type: String, default: '/' },
 
     // ── Env vars (written to .env on VPS at deploy time) ─────────────────
     envVars: { type: [EnvVarSchema], default: [] },

@@ -69,20 +69,20 @@ app.post('/webhooks/github/:projectId', express.raw({ type: '*/*' }), async (req
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-app.use(
-  session({
-    secret:            config.sessionSecret,
-    resave:            false,
-    saveUninitialized: false,
-    store:             MongoStore.create({ mongoUrl: config.mongoUri }),
-    cookie: {
-      maxAge:    1000 * 60 * 60 * 24 * 30, // 30 days
-      httpOnly:  true,
-      secure:    true,   // always true — Replit always serves over HTTPS
-      sameSite:  'none', // required for cross-site iframe (Replit preview)
-    },
-  })
-);
+const sessionMiddleware = session({
+  secret:            config.sessionSecret,
+  resave:            false,
+  saveUninitialized: false,
+  store:             MongoStore.create({ mongoUrl: config.mongoUri }),
+  cookie: {
+    maxAge:    1000 * 60 * 60 * 24 * 30,
+    httpOnly:  true,
+    secure:    true,
+    sameSite:  'none',
+  },
+});
+app.use(sessionMiddleware);
+io.engine.use(sessionMiddleware);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -103,10 +103,26 @@ app.get('/health', (req, res) => res.json({ status: 'ok', service: 'firebox-depl
 app.use('/', require('./routes/dashboard.routes'));
 
 // ── Socket.IO ─────────────────────────────────────────────────────────────
+io.use((socket, next) => {
+  const sessionData = socket.request.session || {};
+  if (config.authDisabled || sessionData.userId || sessionData.userAccountId) return next();
+  next(new Error('Authentication required'));
+});
+
 io.on('connection', (socket) => {
-  socket.on('subscribe:deployment',   (id) => socket.join(`deployment:${id}`));
+  socket.on('subscribe:deployment', async (id) => {
+    const sessionData = socket.request.session || {};
+    if (config.authDisabled || sessionData.userId) return socket.join(`deployment:${id}`);
+    if (!sessionData.userAccountId) return;
+    const UserWorkspace = require('./models/UserWorkspace');
+    const workspace = await UserWorkspace.findOne({ sessionKey: `user:${sessionData.userAccountId}`, 'projects.lastDeploymentId': id }).lean().catch(() => null);
+    if (workspace) socket.join(`deployment:${id}`);
+  });
   socket.on('unsubscribe:deployment', (id) => socket.leave(`deployment:${id}`));
-  socket.on('subscribe:dashboard',    ()   => socket.join('dashboard'));
+  socket.on('subscribe:dashboard', () => {
+    const sessionData = socket.request.session || {};
+    if (config.authDisabled || sessionData.userId) socket.join('dashboard');
+  });
 });
 
 // ── Error handling ─────────────────────────────────────────────────────────
@@ -133,6 +149,8 @@ async function ensureAdminAccount() {
 async function start() {
   await connectDB();
   await ensureAdminAccount();
+  const resumed = await deployService.resumePendingDeployments();
+  if (resumed) console.log(`[deploy] Resumed ${resumed} pending deployment job${resumed === 1 ? '' : 's'}`);
   server.listen(config.port, '0.0.0.0', () => {
     console.log(`
 🔥 Firebox Deploy v2 running on port ${config.port} (${config.nodeEnv})

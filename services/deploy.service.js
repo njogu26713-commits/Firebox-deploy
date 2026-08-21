@@ -60,6 +60,72 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+function projectPort(project) {
+  const envPort = (project.envVars || []).find((item) => item.key === 'PORT')?.value;
+  const port = Number(project.vpsPort || envPort || 3000);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 3000;
+}
+
+function safeHealthPath(path) {
+  const value = String(path || '/').trim();
+  return value.startsWith('/') && !/[\n\r\s]/.test(value) ? value : '/';
+}
+
+async function configureReverseProxy(conn, project, deployPath, port, log) {
+  const rawDomain = String(project.customDomain || project.vpsUrl || '').trim();
+  if (!rawDomain) return '';
+  const domain = rawDomain.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  if (!/^[a-z0-9.-]+$/i.test(domain)) throw new Error('Configured deployment domain contains invalid characters.');
+  const sitePath = `/etc/caddy/sites-enabled/${project.slug}.caddy`;
+  await sshSvc.exec(conn, 'mkdir -p /etc/caddy/sites-enabled');
+  const siteConfig = `${domain} {\n  reverse_proxy 127.0.0.1:${port}\n}\n`;
+  const result = await sshSvc.writeFile(conn, sitePath, siteConfig).then(() => ({ code: 0 })).catch((err) => ({ code: 1, error: err }));
+  if (result.code !== 0) throw new Error(`Reverse proxy configuration was not written: ${result.error.message}`);
+  const validation = await sshSvc.exec(conn, 'caddy validate --config /etc/caddy/Caddyfile');
+  if (validation.code !== 0) throw new Error(`Caddy configuration validation failed: ${validation.stderr || validation.stdout}`);
+  const reload = await sshSvc.exec(conn, 'systemctl reload caddy');
+  if (reload.code !== 0) throw new Error('Caddy reload failed after deployment.');
+  log('info', `✓ Reverse proxy configured for ${domain}`);
+  return /^https?:\/\//i.test(rawDomain) ? rawDomain : `https://${domain}`;
+}
+
+async function healthCheck(conn, port, healthPath, log) {
+  log('info', `Checking application health at http://127.0.0.1:${port}${healthPath}…`);
+  const result = await sshSvc.exec(conn, `curl -fsS --max-time 10 http://127.0.0.1:${port}${healthPath}`);
+  if (result.code !== 0) throw new Error(`Application health check failed on port ${port}${healthPath}`);
+  log('info', '✓ Application is healthy');
+}
+
+async function runDockerPipeline(conn, project, workDir, log) {
+  const port = projectPort(project);
+  const healthPath = safeHealthPath(project.healthPath);
+  const quotedPath = shellQuote(workDir);
+  if (project.envVars && project.envVars.length > 0) {
+    const envContent = project.envVars.filter((item) => item.key).map((item) => `${item.key}=${item.value}`).join('\n') + '\n';
+    await sshSvc.writeFile(conn, `${workDir}/.env`, envContent);
+    log('info', `✓ .env written (${project.envVars.length} variable${project.envVars.length === 1 ? '' : 's'})`);
+  }
+  const composeCheck = await sshSvc.exec(conn, `test -f ${quotedPath}/docker-compose.yml || test -f ${quotedPath}/docker-compose.yaml`);
+  if (composeCheck.code === 0) {
+    log('info', 'Building Docker Compose services…');
+    const compose = await sshSvc.exec(conn, `cd ${quotedPath} && docker compose -p ${shellQuote(`firebox-${project.slug}`)} up -d --build`, (line) => log('info', line), (line) => log('warn', line));
+    if (compose.code !== 0) throw new Error('Docker Compose build/start failed');
+  } else {
+    const image = `firebox-${project.slug}:latest`;
+    log('info', `Building Docker image ${image}…`);
+    const build = await sshSvc.exec(conn, `docker build -t ${shellQuote(image)} ${quotedPath}`, (line) => log('info', line), (line) => log('warn', line));
+    if (build.code !== 0) throw new Error('Docker image build failed');
+    await sshSvc.exec(conn, `docker rm -f ${shellQuote(project.slug)} >/dev/null 2>&1 || true`);
+    const envArg = project.envVars && project.envVars.length ? `--env-file ${shellQuote(`${workDir}/.env`)}` : '';
+    const start = await sshSvc.exec(conn, `docker run -d --restart unless-stopped --name ${shellQuote(project.slug)} ${envArg} -p 127.0.0.1:${port}:${port} ${shellQuote(image)}`);
+    if (start.code !== 0) throw new Error('Docker container failed to start');
+  }
+  log('info', '✓ Container running');
+  await healthCheck(conn, port, healthPath, log);
+  const url = await configureReverseProxy(conn, project, workDir, port, log);
+  return { port, url };
+}
+
 // ── Main pipeline ──────────────────────────────────────────────────────────
 
 /**
@@ -68,12 +134,13 @@ function shellQuote(value) {
  */
 async function runDeployPipeline(project, deployment) {
   const logBuffer = [];
+  const pendingLogWrites = [];
 
   /** Append a log entry to the in-memory buffer and stream it live via Socket.IO. */
   function log(level, message) {
     const entry = { level, message, ts: new Date() };
     logBuffer.push(entry);
-    logger.broadcast(deployment, level, message).catch(() => {});
+    pendingLogWrites.push(logger.broadcast(deployment, level, message).catch(() => {}));
   }
 
   let conn;
@@ -140,6 +207,26 @@ async function runDeployPipeline(project, deployment) {
     // Work directory (repo root or configured sub-directory)
     const rootSuffix = project.rootDirectory && project.rootDirectory !== '.' ? `/${project.rootDirectory}` : '';
     const workDir    = `${deployPath}${rootSuffix}`;
+    const quotedWorkDir = shellQuote(workDir);
+    const port = projectPort(project);
+    const healthPath = safeHealthPath(project.healthPath);
+    const dockerfile = await sshSvc.exec(conn, `test -f ${quotedWorkDir}/Dockerfile`);
+    const compose = await sshSvc.exec(conn, `test -f ${quotedWorkDir}/docker-compose.yml || test -f ${quotedWorkDir}/docker-compose.yaml`);
+
+    if (dockerfile.code === 0 || compose.code === 0 || project.type === 'docker') {
+      log('info', '[3/4] Docker project detected.');
+      const dockerResult = await runDockerPipeline(conn, project, workDir, log);
+      await logger.setStatus(deployment, 'deploying');
+      deployment.status = 'deploying';
+      deployment.url = dockerResult.url;
+      deployment.meta = { ...(deployment.meta || {}), server: 'firebox-server', port: dockerResult.port, runtime: 'docker' };
+      log('info', 'DEPLOYMENT SUCCESSFUL');
+      await Promise.all(pendingLogWrites);
+      deployment.logs = logBuffer;
+      await logger.setStatus(deployment, 'success');
+      await Project.findByIdAndUpdate(project._id, { status: 'success', lastDeployedAt: new Date(), deployPath, vpsPort: dockerResult.port, vpsUrl: dockerResult.url || project.vpsUrl || '', setupError: '' });
+      return;
+    }
 
     // ── Step 3: Install & Build ──────────────────────────────────────────
     log('info', '[3/4] Installing dependencies…');
@@ -147,7 +234,6 @@ async function runDeployPipeline(project, deployment) {
     // Detect the package manager from the repository's lockfiles. The
     // precedence is pnpm, yarn, then npm; package-lock is therefore not
     // required for the npm fallback.
-    const quotedWorkDir = shellQuote(workDir);
     const lockfileResult = await sshSvc.exec(
       conn,
       `if [ -f ${quotedWorkDir}/pnpm-lock.yaml ]; then printf pnpm; ` +
@@ -271,10 +357,10 @@ async function runDeployPipeline(project, deployment) {
 
     // Atomically check and start/restart — avoids race conditions
     const pm2Cmd = [
-      `cd ${workDir}`,
-      `pm2 describe ${pm2Name} > /dev/null 2>&1`,
-      `&& pm2 restart ${pm2Name} --update-env`,
-      `|| pm2 start "${startCmd}" --name ${pm2Name} --update-env`,
+      `cd ${quotedWorkDir}`,
+      `PORT=${port} pm2 describe ${shellQuote(pm2Name)} > /dev/null 2>&1`,
+      `&& PORT=${port} pm2 restart ${shellQuote(pm2Name)} --update-env`,
+      `|| PORT=${port} pm2 start ${shellQuote(startCmd)} --name ${shellQuote(pm2Name)} --update-env`,
     ].join(' ');
 
     const { code: pm2Code } = await sshSvc.exec(
@@ -286,11 +372,14 @@ async function runDeployPipeline(project, deployment) {
 
     // Save PM2 list so processes survive reboots
     await sshSvc.exec(conn, 'pm2 save --force', (line) => log('info', line));
+    await healthCheck(conn, port, healthPath, log);
+    const publicUrl = await configureReverseProxy(conn, project, deployPath, port, log);
 
     // ── Success ───────────────────────────────────────────────────────────
-    log('info', '');
-    log('info', '✅ Deployment complete!');
-
+    log('info', 'DEPLOYMENT SUCCESSFUL');
+    deployment.url = publicUrl || project.vpsUrl || '';
+    deployment.meta = { ...(deployment.meta || {}), server: 'firebox-server', port, runtime: 'node' };
+    await Promise.all(pendingLogWrites);
     deployment.logs = logBuffer;
     await logger.setStatus(deployment, 'success');
 
@@ -298,12 +387,15 @@ async function runDeployPipeline(project, deployment) {
       status:         'success',
       lastDeployedAt: new Date(),
       deployPath,
+      vpsPort:        port,
+      vpsUrl:         publicUrl || project.vpsUrl || '',
       setupError:     '',
     });
 
   } catch (err) {
     log('error', `❌ Deployment failed: ${err.message}`);
 
+    await Promise.all(pendingLogWrites);
     deployment.logs = logBuffer;
     await logger.setStatus(deployment, 'failed').catch(() => {});
 
@@ -326,6 +418,18 @@ async function runDeployPipeline(project, deployment) {
  * Trigger a new deployment for the given project.
  * Creates a Deployment record, responds immediately, then runs the pipeline.
  */
+async function resumePendingDeployments() {
+  const pending = await Deployment.find({ status: { $in: ['queued', 'building', 'deploying'] } }).populate('project');
+  for (const deployment of pending) {
+    if (!deployment.project) {
+      await Deployment.findByIdAndUpdate(deployment._id, { status: 'failed', completedAt: new Date(), $push: { logs: { level: 'error', message: 'Deployment project no longer exists.', ts: new Date() } } });
+      continue;
+    }
+    runDeployPipeline(deployment.project, deployment).catch((err) => console.error(`[deploy] resume error for ${deployment.project.slug}:`, err.message));
+  }
+  return pending.length;
+}
+
 async function triggerDeploy(project, triggeredBy = 'manual') {
   const deployment = await Deployment.create({
     project:     project._id,
@@ -346,4 +450,4 @@ async function triggerDeploy(project, triggeredBy = 'manual') {
   return { deployment, deploymentId: deployment._id };
 }
 
-module.exports = { triggerDeploy };
+module.exports = { triggerDeploy, resumePendingDeployments };

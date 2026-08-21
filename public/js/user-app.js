@@ -1,5 +1,9 @@
 function escapeHtml(value) { const el = document.createElement('textarea'); el.textContent = value == null ? '' : String(value); return el.innerHTML; }
 
+let activeUserDeploymentId = '';
+let activeUserProjectId = '';
+let hydratedUserDeploymentId = '';
+
 const userSections = {
   home: ['Your workspace', 'One place to plan and ship your projects.'],
   projects: ['Projects', 'Your connected applications.'],
@@ -39,15 +43,63 @@ function setIdentity() {
 
 function userProjectCard(project) {
   const deployable = project.sourceType !== 'upload';
-  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">User workspace project</div></div><div class="beacon"><span class="beacon-dot"></span>connected</div></div><div class="project-domain">${escapeHtml(project.repoUrl)}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.branch || 'main')}</b></span><span>Provider <b>Firebox VPS</b></span></div><div class="project-card-actions">${deployable ? `<button class="btn btn-primary btn-sm user-deploy-project" data-project-id="${project._id}">Deploy this project →</button>` : '<span class="text-muted project-upload-note">Connect GitHub to deploy</span>'}</div></div>`;
+  const currentStatus = project.lastDeploymentId ? 'Deploy again' : 'Deploy this project';
+  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">${escapeHtml(project.framework || 'User workspace project')}</div></div><div class="beacon"><span class="beacon-dot"></span>${escapeHtml(project.lastDeploymentId ? 'deployment available' : 'connected')}</div></div><div class="project-domain">${escapeHtml(project.repoUrl)}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.branch || 'main')}</b></span><span>Provider <b>Firebox VPS</b></span></div><div class="project-card-actions">${deployable ? `<button class="btn btn-primary btn-sm user-deploy-project" data-project-id="${project._id}">${currentStatus} →</button>` : '<span class="text-muted project-upload-note">Connect GitHub to deploy</span>'}</div></div>`;
+}
+
+function showUserDeploymentConsole(project, deploymentId, status = 'queued') {
+  activeUserDeploymentId = String(deploymentId || '');
+  activeUserProjectId = String(project?._id || '');
+  const consoleEl = document.getElementById('userDeploymentConsole');
+  consoleEl.style.display = 'block';
+  document.getElementById('userDeploymentTitle').textContent = `Deployment #${deploymentId} · ${project?.name || 'Project'}`;
+  document.getElementById('userDeploymentStatus').textContent = status;
+  document.getElementById('userDeploymentSummary').innerHTML = `Repository: <strong>${escapeHtml(project?.repoUrl || '—')}</strong><br>Branch: <strong>${escapeHtml(project?.branch || 'main')}</strong><br>Server: <strong>firebox-server</strong>`;
+  if (hydratedUserDeploymentId !== activeUserDeploymentId) {
+    document.getElementById('userDeploymentTerminal').textContent = '';
+    document.getElementById('userDeploymentResult').style.display = 'none';
+    document.querySelectorAll('#userDeploymentSteps [data-stage]').forEach((item) => item.dataset.state = '');
+    hydratedUserDeploymentId = activeUserDeploymentId;
+  }
+  showUserSection('deploy');
+}
+
+function appendUserDeploymentLog(entry) {
+  const terminal = document.getElementById('userDeploymentTerminal');
+  const line = document.createElement('div');
+  line.className = `deployment-log-line ${entry.level || 'info'}`;
+  line.textContent = `[${new Date(entry.ts || Date.now()).toLocaleTimeString()}] ${entry.message || ''}`;
+  terminal.appendChild(line);
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+function updateUserDeploymentStatus(status, deployment = {}) {
+  document.getElementById('userDeploymentStatus').textContent = status;
+  const stateMap = { queued: 'queue', building: 'build', deploying: 'start', success: 'health', failed: 'health' };
+  const current = stateMap[status];
+  const order = ['validate', 'queue', 'ssh', 'source', 'build', 'start', 'health'];
+  const currentIndex = current ? order.indexOf(current) : -1;
+  document.querySelectorAll('#userDeploymentSteps [data-stage]').forEach((item) => {
+    const index = order.indexOf(item.dataset.stage);
+    item.dataset.state = index < currentIndex ? 'done' : index === currentIndex ? 'running' : '';
+  });
+  if (['success', 'failed', 'crashed'].includes(status)) {
+    const result = document.getElementById('userDeploymentResult');
+    result.style.display = 'block';
+    result.innerHTML = status === 'success' ? `<strong>DEPLOYMENT SUCCESSFUL</strong><br>Project is running.${deployment.url ? `<br>URL: <a href="${escapeHtml(deployment.url)}" target="_blank">${escapeHtml(deployment.url)}</a>` : ''}` : `<strong>DEPLOYMENT FAILED</strong><br>${escapeHtml((deployment.logs || []).slice(-1)[0]?.message || 'Review the deployment logs.')}`;
+  }
 }
 
 async function deployUserProject(projectId, button) {
-  button.disabled = true; button.textContent = 'Starting deployment…';
+  button.disabled = true; button.textContent = 'Creating deployment…';
   try {
     const result = await userFetch(`/api/user/workspace/projects/${projectId}/deploy`, { method: 'POST' });
-    showToast(result.message || 'Deployment started on the Firebox Deploy VPS.', 'success');
-    button.textContent = 'Deployment started';
+    const project = (window.fireboxUserProjects || []).find((item) => String(item._id) === String(projectId)) || { _id: projectId };
+    showUserDeploymentConsole(project, result.deploymentId, result.status || 'queued');
+    fireboxSocket.emit('subscribe:deployment', String(result.deploymentId));
+    appendUserDeploymentLog({ level: 'info', message: `Deployment ${result.deploymentId} queued. The VPS pipeline is starting.`, ts: new Date() });
+    updateUserDeploymentStatus('queued');
+    button.textContent = 'Deployment queued';
     await loadWorkspace();
   } catch (err) { showToast(err.message, 'error'); button.disabled = false; button.textContent = 'Deploy this project →'; }
 }
@@ -65,6 +117,7 @@ async function loadWorkspace() {
   try {
     const { workspace } = await userFetch('/api/user/workspace');
     const projects = workspace.projects || [];
+    window.fireboxUserProjects = projects;
     document.getElementById('homeProjectCount').textContent = projects.length;
     document.getElementById('userProjectsGrid').innerHTML = projects.map(userProjectCard).join('');
     document.getElementById('userDeployGrid').innerHTML = projects.filter((project) => project.sourceType !== 'upload').map(userProjectCard).join('');
@@ -84,10 +137,32 @@ async function pollActiveDeployments(projects) {
   await Promise.all(active.map(async (project) => {
     try {
       const result = await userFetch(`/api/user/workspace/projects/${project._id}/deployments/${project.lastDeploymentId}`);
-      if (['queued', 'running', 'building', 'deploying'].includes(result.deployment.status)) setTimeout(() => loadWorkspace(), 8000);
+      const deployment = result.deployment;
+      if (!activeUserDeploymentId || activeUserDeploymentId === String(project.lastDeploymentId)) {
+        showUserDeploymentConsole(project, project.lastDeploymentId, deployment.status);
+        fireboxSocket.emit('subscribe:deployment', String(project.lastDeploymentId));
+        if (hydratedUserDeploymentId === String(project.lastDeploymentId) && deployment.logs?.length && !document.getElementById('userDeploymentTerminal').children.length) deployment.logs.forEach(appendUserDeploymentLog);
+        updateUserDeploymentStatus(deployment.status, deployment);
+      }
+      if (['queued', 'building', 'deploying'].includes(deployment.status)) setTimeout(() => loadWorkspace(), 8000);
     } catch (_) { /* The deployment may be in the process of being created. */ }
   }));
 }
+
+fireboxSocket.on('log:line', (data) => {
+  if (String(data.deploymentId) !== String(activeUserDeploymentId)) return;
+  appendUserDeploymentLog(data);
+});
+
+fireboxSocket.on('deployment:status', async (data) => {
+  if (String(data.deploymentId) !== String(activeUserDeploymentId)) return;
+  updateUserDeploymentStatus(data.status);
+  if (['success', 'failed', 'crashed'].includes(data.status)) {
+    const result = await userFetch(`/api/user/workspace/projects/${activeUserProjectId}/deployments/${data.deploymentId}`).catch(() => null);
+    updateUserDeploymentStatus(data.status, result?.deployment || {});
+    await loadWorkspace();
+  }
+});
 
 async function loadUserProjects() { await loadWorkspace(); }
 function renderUserHistory(records) {

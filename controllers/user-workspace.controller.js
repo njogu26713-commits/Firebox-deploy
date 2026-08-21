@@ -118,13 +118,20 @@ async function deployProject(req, res, next) {
     const admin = await User.findOne({ $or: [{ email: config.adminEmail.toLowerCase() }, { role: 'owner' }] });
     if (!admin) return res.status(503).json({ error: 'Admin deployment settings are not configured.' });
     if (!admin.sshHost || !admin.sshUsername || (!admin.sshPrivateKey && !admin.sshPassword)) return res.status(503).json({ error: 'The admin must configure VPS SSH credentials in the admin Settings page first.' });
+    const githubMatch = String(project.repoUrl || '').match(/^https?:\/\/github\.com\/([^/]+)\/([^/#]+)(?:\.git)?(?:[#?].*)?$/i);
+    if (!githubMatch) return res.status(400).json({ error: 'A GitHub repository is required for VPS deployment.' });
+    try {
+      await githubService.inspectRepository(workspace.toObject(), githubMatch[1], githubMatch[2], project.branch || 'main');
+    } catch (err) {
+      return res.status(400).json({ error: `The selected branch could not be verified: ${err.message}` });
+    }
     let deploymentProject = project.deploymentProjectId ? await Project.findById(project.deploymentProjectId) : null;
     if (!deploymentProject) {
       const baseSlug = slugify(project.name);
       let slug = `user-${baseSlug}`;
       let suffix = 1;
       while (await Project.exists({ slug })) { slug = `user-${baseSlug}-${suffix++}`; }
-      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: project.framework === 'Next.js' ? 'nextjs' : 'node-app', repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
+      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: (project.detectedFiles || []).includes('Dockerfile') ? 'docker' : 'node-app', repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
       project.deploymentProjectId = deploymentProject._id;
     } else {
       deploymentProject.repoUrl = project.repoUrl;

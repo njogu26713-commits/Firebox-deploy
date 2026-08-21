@@ -1,3 +1,4 @@
+const Deployment = require('../models/Deployment');
 let ioInstance = null;
 
 function attachIO(io) {
@@ -7,6 +8,7 @@ function attachIO(io) {
 /** Broadcast a single log line to clients watching this deployment's Socket.IO room. */
 async function broadcast(deployment, level = 'info', message = '') {
   const entry = { ts: new Date(), level, message };
+  await Deployment.updateOne({ _id: deployment._id }, { $push: { logs: entry } }).catch(() => {});
   if (ioInstance) {
     ioInstance.to(`deployment:${deployment._id}`).emit('log:line', {
       deploymentId: deployment._id.toString(),
