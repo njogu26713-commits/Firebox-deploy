@@ -110,9 +110,19 @@ function createUserSecretRow(item = {}) {
   const row = document.createElement('div');
   row.className = 'env-row user-secret-row';
   row.innerHTML = '<input class="env-key" placeholder="KEY_NAME" autocomplete="off"><input class="env-value" type="password" placeholder="Enter value" autocomplete="new-password"><label class="secret-remove"><input class="remove-secret" type="checkbox"> Remove</label><button class="btn btn-ghost btn-sm remove-secret-row" type="button" aria-label="Remove row">×</button>';
-  row.querySelector('.env-key').value = item.key || '';
-  row.querySelector('.env-value').placeholder = item.configured ? 'Saved value · leave blank to keep' : 'Enter value';
+  const keyInput = row.querySelector('.env-key');
+  const valueInput = row.querySelector('.env-value');
+  keyInput.value = item.key || '';
   row.dataset.configured = item.configured ? 'true' : 'false';
+  row.dataset.masked = item.configured ? 'true' : 'false';
+  if (item.configured) {
+    valueInput.value = item.maskedValue || '••••••••';
+    valueInput.placeholder = 'Saved value · type to replace';
+    valueInput.addEventListener('focus', () => {
+      if (row.dataset.masked === 'true') { valueInput.value = ''; row.dataset.masked = 'false'; }
+    });
+  }
+  valueInput.addEventListener('input', () => { row.dataset.masked = 'false'; });
   row.querySelector('.remove-secret-row').addEventListener('click', () => row.remove());
   return row;
 }
@@ -142,14 +152,14 @@ async function saveUserSecrets() {
   try {
     const envVars = Array.from(document.querySelectorAll('#userSecretsRows .user-secret-row')).map((row) => ({
       key: row.querySelector('.env-key').value.trim(),
-      value: row.querySelector('.env-value').value,
+      value: row.dataset.masked === 'true' ? '••••••••' : row.querySelector('.env-value').value,
       remove: row.querySelector('.remove-secret').checked,
     }));
     const result = await userFetch(`/api/user/workspace/projects/${activeUserSecretsProjectId}/secrets`, { method: 'PUT', body: JSON.stringify({ envVars }) });
     document.getElementById('userSecretsRows').innerHTML = '';
     (result.envVars || []).forEach(addUserSecretRow);
     if (!result.envVars?.length) addUserSecretRow();
-    showFormMessage('userSecretsMessage', 'Secrets saved securely. Existing values remain hidden.', false);
+    showFormMessage('userSecretsMessage', 'Secrets saved securely. They will be reused on the next deployment.', false);
   } catch (err) { showFormMessage('userSecretsMessage', err.message, true); } finally { button.disabled = false; }
 }
 

@@ -91,8 +91,10 @@ async function addProject(req, res, next) {
   } catch (err) { next(err); }
 }
 
+const MASKED_SECRET = '••••••••';
+
 function publicEnvVars(project) {
-  return (project?.envVars || []).map((item) => ({ key: item.key, secret: true, configured: true }));
+  return (project?.envVars || []).map((item) => ({ key: item.key, secret: true, configured: true, maskedValue: MASKED_SECRET }));
 }
 
 function sanitizeWorkspace(workspace) {
@@ -127,14 +129,14 @@ async function saveProjectSecrets(req, res, next) {
       seen.add(key);
       if (raw.remove) continue;
       const existing = current.get(key);
-      if (!value && existing) nextVars.push({ key, value: existing.value, secret: true, encrypted: true });
+      if ((!value || value === MASKED_SECRET) && existing) nextVars.push({ key, value: existing.value, secret: true, encrypted: true });
       else if (value) nextVars.push({ key, value: encrypt(value), secret: true, encrypted: true });
       else return res.status(400).json({ error: `Enter a value for ${key}, or remove it.` });
     }
     project.envVars = nextVars;
     await workspace.save();
     if (project.deploymentProjectId) await Project.findByIdAndUpdate(project.deploymentProjectId, { $set: { envVars: nextVars } });
-    res.json({ envVars: publicEnvVars(project), message: 'Secrets saved securely.' });
+    res.json({ envVars: publicEnvVars(project), message: 'Secrets saved securely and retained for future redeployments.' });
   } catch (err) { next(err); }
 }
 
