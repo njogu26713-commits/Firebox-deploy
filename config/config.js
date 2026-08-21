@@ -12,6 +12,9 @@ module.exports = {
   adminEmail:    process.env.ADMIN_EMAIL    || 'admin@firebox.local',
   adminPassword: process.env.ADMIN_PASSWORD || 'admin123',
 
+  // Temporary development-only switch. Keep false in any internet-facing deployment.
+  authDisabled: process.env.DISABLE_AUTH === 'true',
+
   github: {
     webhookSecret: process.env.GITHUB_WEBHOOK_SECRET || '',
   },

@@ -3,6 +3,11 @@ const config = require('../config/config');
 
 // Protects API routes — expects a valid session OR a Bearer JWT.
 function requireAuth(req, res, next) {
+  if (config.authDisabled) {
+    // Temporary development bypass; never enable on an internet-facing instance.
+    req.userId = req.session?.userId || 'dev-auth-disabled';
+    return next();
+  }
   if (req.session && req.session.userId) {
     return next();
   }
@@ -25,6 +30,11 @@ function requireAuth(req, res, next) {
 
 // Protects server-rendered dashboard pages — redirects to /login instead of 401.
 function requirePageAuth(req, res, next) {
+  if (config.authDisabled) {
+    // Give page handlers the session identity they normally receive after login.
+    if (req.session && !req.session.userId) req.session.userId = 'dev-auth-disabled';
+    return next();
+  }
   if (req.session && req.session.userId) {
     return next();
   }

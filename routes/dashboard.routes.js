@@ -2,13 +2,14 @@ const express = require('express');
 const path    = require('path');
 const router  = express.Router();
 const { requirePageAuth } = require('../middleware/auth.middleware');
+const config = require('../config/config');
 
 const views = (file) => path.join(__dirname, '..', 'views', file);
 
-router.get('/', (req, res) => res.redirect(req.session.userId ? '/dashboard' : '/login'));
+router.get('/', (req, res) => res.redirect(config.authDisabled || req.session.userId ? '/dashboard' : '/login'));
 
 router.get('/login',         (req, res) => {
-  if (req.session.userId) return res.redirect('/dashboard');
+  if (config.authDisabled || req.session.userId) return res.redirect('/dashboard');
   res.sendFile(views('login.html'));
 });
 
