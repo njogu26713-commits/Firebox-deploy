@@ -18,6 +18,11 @@ const UserWorkspaceSchema = new mongoose.Schema(
       uploadPath: { type: String, default: '' },
       deploymentProjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project' },
       lastDeploymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deployment' },
+      packageManager: { type: String, default: '' },
+      framework: { type: String, default: '' },
+      buildCommand: { type: String, default: '' },
+      startCommand: { type: String, default: '' },
+      detectedFiles: { type: [String], default: [] },
       createdAt: { type: Date, default: Date.now },
     }],
     activity: [{

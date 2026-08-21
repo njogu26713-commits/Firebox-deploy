@@ -13,9 +13,12 @@ router.use(requireUserAuth);
 
 router.get('/', ctrl.getWorkspace);
 router.get('/github-connection', ctrl.getGithubConnection);
+router.get('/github/repositories', ctrl.listGithubRepositories);
+router.get('/github/repositories/:owner/:repo/inspect', ctrl.inspectGithubRepository);
 router.get('/github/oauth/start', githubCtrl.startOAuth);
 router.get('/github/oauth/callback', githubCtrl.oauthCallback);
 router.put('/github-connection', ctrl.saveGithubConnection);
+router.post('/github/import', ctrl.importGithubRepository);
 router.post('/projects', ctrl.addProject);
 router.post('/projects/:projectId/deploy', ctrl.deployProject);
 router.get('/projects/:projectId/deployments/:deploymentId', ctrl.getDeploymentStatus);

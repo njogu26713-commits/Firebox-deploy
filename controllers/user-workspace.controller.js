@@ -4,6 +4,7 @@ const Deployment = require('../models/Deployment');
 const User = require('../models/User');
 const config = require('../config/config');
 const deployService = require('../services/deploy.service');
+const githubService = require('../services/user-github.service');
 const { encrypt } = require('../services/crypto.service');
 
 function sessionKey(req) {
@@ -15,6 +16,21 @@ async function getWorkspace(req, res, next) {
     const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) }).lean();
     res.json({ workspace: workspace || { projects: [], activity: [] } });
   } catch (err) { next(err); }
+}
+
+async function listGithubRepositories(req, res, next) {
+  try {
+    const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) }).lean();
+    res.json({ repositories: await githubService.listRepositories(workspace) });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+}
+
+async function inspectGithubRepository(req, res, next) {
+  try {
+    const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) }).lean();
+    const branch = String(req.query.branch || 'main').trim() || 'main';
+    res.json({ repository: await githubService.inspectRepository(workspace, req.params.owner, req.params.repo, branch) });
+  } catch (err) { res.status(502).json({ error: err.message }); }
 }
 
 async function getGithubConnection(req, res, next) {
@@ -36,6 +52,25 @@ async function saveGithubConnection(req, res, next) {
     ).lean();
     res.json({ connected: true, username: workspace.githubUsername, connectedAt: workspace.githubConnectedAt });
   } catch (err) { next(err); }
+}
+
+async function importGithubRepository(req, res, next) {
+  try {
+    const owner = String(req.body.owner || '').trim();
+    const repo = String(req.body.repo || '').trim();
+    const branch = String(req.body.branch || 'main').trim() || 'main';
+    const provider = String(req.body.provider || 'railway').trim().toLowerCase();
+    const name = String(req.body.name || repo).trim().slice(0, 120);
+    if (!owner || !repo || !name) return res.status(400).json({ error: 'Repository and project name are required.' });
+    if (!['railway', 'vercel', 'heroku', 'render'].includes(provider)) return res.status(400).json({ error: 'Unsupported deployment provider.' });
+    const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) });
+    const repository = await githubService.inspectRepository(workspace?.toObject ? workspace.toObject() : workspace, owner, repo, branch);
+    const detected = repository.detected;
+    const project = { name, repoUrl: `https://github.com/${owner}/${repo}`, branch, provider, sourceType: 'github', packageManager: detected.packageManager, framework: detected.framework, buildCommand: detected.buildCommand, startCommand: detected.startCommand, detectedFiles: repository.files };
+    const updated = await UserWorkspace.findOneAndUpdate({ sessionKey: sessionKey(req) }, { $setOnInsert: { sessionKey: sessionKey(req) }, $push: { projects: project } }, { upsert: true, new: true, runValidators: true }).lean();
+    const created = updated.projects[updated.projects.length - 1];
+    res.status(201).json({ project: created, detected });
+  } catch (err) { res.status(502).json({ error: err.message }); }
 }
 
 async function addProject(req, res, next) {
@@ -89,12 +124,14 @@ async function deployProject(req, res, next) {
       let slug = `user-${baseSlug}`;
       let suffix = 1;
       while (await Project.exists({ slug })) { slug = `user-${baseSlug}-${suffix++}`; }
-      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: 'node-app', repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', pm2Name: slug });
+      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: project.framework === 'Next.js' ? 'nextjs' : 'node-app', repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
       project.deploymentProjectId = deploymentProject._id;
     } else {
       deploymentProject.repoUrl = project.repoUrl;
       deploymentProject.githubBranch = project.branch || 'main';
       deploymentProject.githubToken = workspace.githubToken || '';
+      deploymentProject.buildCommand = project.buildCommand || '';
+      deploymentProject.startCommand = project.startCommand || '';
       await deploymentProject.save();
     }
     const { deploymentId } = await deployService.triggerDeploy(deploymentProject, 'manual');
@@ -112,6 +149,10 @@ async function getDeploymentStatus(req, res, next) {
     if (!project || !project.lastDeploymentId || project.lastDeploymentId.toString() !== req.params.deploymentId) return res.status(404).json({ error: 'Deployment not found.' });
     const deployment = await Deployment.findById(project.lastDeploymentId).lean();
     if (!deployment) return res.status(404).json({ error: 'Deployment not found.' });
+    const latestActivity = [...workspace.activity].reverse().find((item) => item.projectName === project.name && item.provider === 'vps');
+    if (latestActivity && latestActivity.status !== deployment.status) {
+      await UserWorkspace.updateOne({ sessionKey: sessionKey(req), 'activity._id': latestActivity._id }, { $set: { 'activity.$.status': deployment.status } });
+    }
     res.json({ deployment: { id: deployment._id, status: deployment.status, url: deployment.url, logs: deployment.logs || [], triggeredAt: deployment.triggeredAt, completedAt: deployment.completedAt } });
   } catch (err) { next(err); }
 }
@@ -131,4 +172,4 @@ async function recordDeployment(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { getWorkspace, getGithubConnection, saveGithubConnection, addProject, addUploadedProject, deployProject, getDeploymentStatus, recordDeployment };
+module.exports = { getWorkspace, listGithubRepositories, inspectGithubRepository, getGithubConnection, saveGithubConnection, importGithubRepository, addProject, addUploadedProject, deployProject, getDeploymentStatus, recordDeployment };

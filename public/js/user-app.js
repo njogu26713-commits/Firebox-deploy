@@ -1,3 +1,5 @@
+function escapeHtml(value) { const el = document.createElement('textarea'); el.textContent = value == null ? '' : String(value); return el.innerHTML; }
+
 const userSections = {
   home: ['Your workspace', 'One place to plan and ship your projects.'],
   projects: ['Projects', 'Your connected applications.'],
@@ -69,10 +71,22 @@ async function loadWorkspace() {
     document.getElementById('userProjectsEmpty').style.display = projects.length ? 'none' : 'block';
     document.getElementById('userDeployEmpty').style.display = projects.some((project) => project.sourceType !== 'upload') ? 'none' : 'block';
     renderUserHistory(workspace.activity || []);
+    pollActiveDeployments(projects);
   } catch (err) {
     document.getElementById('homeProjectCount').textContent = '0';
     showToast(err.message, 'error');
   }
+}
+
+async function pollActiveDeployments(projects) {
+  const active = projects.filter((project) => project.lastDeploymentId && project.sourceType !== 'upload');
+  if (!active.length) return;
+  await Promise.all(active.map(async (project) => {
+    try {
+      const result = await userFetch(`/api/user/workspace/projects/${project._id}/deployments/${project.lastDeploymentId}`);
+      if (['queued', 'running', 'building', 'deploying'].includes(result.deployment.status)) setTimeout(() => loadWorkspace(), 8000);
+    } catch (_) { /* The deployment may be in the process of being created. */ }
+  }));
 }
 
 async function loadUserProjects() { await loadWorkspace(); }
@@ -95,8 +109,13 @@ document.getElementById('chooseGithubToken').addEventListener('click', () => {
 });
 
 document.querySelectorAll('[data-create]').forEach((choice) => choice.addEventListener('click', () => {
-  document.getElementById('githubCreateForm').style.display = choice.dataset.create === 'github' ? 'block' : 'none';
-  document.getElementById('uploadCreateForm').style.display = choice.dataset.create === 'upload' ? 'block' : 'none';
+  if (choice.dataset.create === 'github') {
+    showUserSection('source');
+    loadGithubConnection();
+    return;
+  }
+  document.getElementById('githubCreateForm').style.display = 'none';
+  document.getElementById('uploadCreateForm').style.display = 'block';
 }));
 document.querySelectorAll('[data-close-create]').forEach((button) => button.addEventListener('click', () => {
   document.getElementById('githubCreateForm').style.display = 'none';
@@ -158,9 +177,52 @@ async function loadGithubConnection() {
       document.getElementById('githubConnectionForm').style.display = 'none';
       document.getElementById('githubOAuthHint').style.display = 'none';
     }
-    if (connection.connected) document.getElementById('githubUsername').value = connection.username;
+    if (connection.connected) {
+      document.getElementById('githubUsername').value = connection.username;
+      await loadGithubRepositories();
+    }
   } catch (err) { showFormMessage('githubConnectionMessage', err.message, true); }
 }
+
+async function loadGithubRepositories() {
+  const select = document.getElementById('githubRepositorySelect');
+  select.innerHTML = '<option value="">Loading repositories…</option>';
+  try {
+    const { repositories } = await userFetch('/api/user/workspace/github/repositories');
+    select.innerHTML = repositories.length ? '<option value="">Choose an existing repository…</option>' : '<option value="">No accessible repositories found</option>';
+    repositories.forEach((repo) => {
+      const option = document.createElement('option');
+      option.value = repo.fullName;
+      option.textContent = `${repo.fullName}${repo.private ? ' · private' : ''}`;
+      option.dataset.owner = repo.fullName.split('/')[0];
+      option.dataset.repo = repo.name;
+      option.dataset.branch = repo.defaultBranch || 'main';
+      option.dataset.url = repo.htmlUrl;
+      option.dataset.description = repo.description || '';
+      option.dataset.language = repo.language || '';
+      select.appendChild(option);
+    });
+  } catch (err) { select.innerHTML = `<option value="">Could not load repositories</option>`; showFormMessage('sourceFormMessage', err.message, true); }
+}
+
+async function inspectSelectedRepository() {
+  const select = document.getElementById('githubRepositorySelect');
+  const option = select.options[select.selectedIndex];
+  if (!option || !option.dataset.owner) return;
+  const meta = document.getElementById('githubRepositoryMeta');
+  meta.style.display = 'block'; meta.textContent = 'Inspecting repository contents…';
+  try {
+    const data = await userFetch(`/api/user/workspace/github/repositories/${encodeURIComponent(option.dataset.owner)}/${encodeURIComponent(option.dataset.repo)}/inspect?branch=${encodeURIComponent(option.dataset.branch)}`);
+    const detected = data.repository.detected;
+    document.getElementById('sourceProjectName').value = option.dataset.repo;
+    document.getElementById('sourceRepoUrl').value = option.dataset.url;
+    document.getElementById('sourceBranch').value = data.repository.branch;
+    meta.innerHTML = `<strong>${escapeHtml(detected.framework)}</strong> · ${escapeHtml(detected.packageManager)} · ${detected.hasDockerfile ? 'Dockerfile found' : 'No Dockerfile'} · ${detected.hasFireboxConfig ? 'fireboxdeploy.toml found' : 'standard detection'}<br><small>Build: ${escapeHtml(detected.buildCommand || 'auto-detect')} · Start: ${escapeHtml(detected.startCommand || 'auto-detect')}</small>`;
+  } catch (err) { meta.textContent = err.message; }
+}
+
+document.getElementById('githubRepositorySelect').addEventListener('change', inspectSelectedRepository);
+document.getElementById('refreshGithubRepos').addEventListener('click', loadGithubRepositories);
 
 document.getElementById('githubConnectionForm').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -175,9 +237,11 @@ document.getElementById('githubConnectionForm').addEventListener('submit', async
 
 document.getElementById('sourceImportSubmit').addEventListener('click', async () => {
   const button = document.getElementById('sourceImportSubmit'); button.disabled = true;
+  const option = document.getElementById('githubRepositorySelect').selectedOptions[0];
   try {
-    await userFetch('/api/user/workspace/projects', { method: 'POST', body: JSON.stringify({ name: document.getElementById('sourceProjectName').value, repoUrl: document.getElementById('sourceRepoUrl').value, branch: document.getElementById('sourceBranch').value || 'main', provider: document.getElementById('sourceProvider').value }) });
-    showFormMessage('sourceFormMessage', 'GitHub project imported into your user workspace.');
+    if (!option || !option.dataset.owner) throw new Error('Choose a GitHub repository first.');
+    await userFetch('/api/user/workspace/github/import', { method: 'POST', body: JSON.stringify({ owner: option.dataset.owner, repo: option.dataset.repo, name: document.getElementById('sourceProjectName').value || option.dataset.repo, branch: document.getElementById('sourceBranch').value || option.dataset.branch || 'main', provider: document.getElementById('sourceProvider').value }) });
+    showFormMessage('sourceFormMessage', 'GitHub repository inspected and project created with detected content.');
     await loadWorkspace();
   } catch (err) { showFormMessage('sourceFormMessage', err.message, true); } finally { button.disabled = false; }
 });
