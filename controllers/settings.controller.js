@@ -2,6 +2,7 @@ const User   = require('../models/User');
 const config = require('../config/config');
 const crypto = require('../services/crypto.service');
 const sshService = require('../services/ssh.service');
+const net = require('net');
 
 async function getAdminUser(req) {
   const sessionId = req.session?.userId || req.userId;
@@ -40,6 +41,29 @@ async function testSshConnection(req, res) {
   } finally {
     if (conn) conn.end();
   }
+}
+
+async function testOutboundTcp(req, res) {
+  const user = await getAdminUser(req);
+  if (!user || !user.sshHost) return res.status(400).json({ error: 'Save the VPS host before testing outbound TCP connectivity.' });
+  const host = user.sshHost;
+  const port = Number(user.sshPort || 22);
+  const startedAt = Date.now();
+  const result = await new Promise((resolve) => {
+    let settled = false;
+    const socket = net.createConnection({ host, port, timeout: 10000 });
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({ ...payload, host, port, elapsedMs: Date.now() - startedAt });
+    };
+    socket.once('connect', () => finish({ status: 'success', message: `TCP connection from Railway to ${host}:${port}: SUCCESS` }));
+    socket.once('timeout', () => finish({ status: 'timeout', message: `TCP connection from Railway to ${host}:${port}: TIMEOUT after 10 seconds` }));
+    socket.once('error', (err) => finish({ status: 'failed', message: `TCP connection from Railway to ${host}:${port}: FAILED (${err.code || err.message})` }));
+  });
+  if (result.status === 'success') return res.json(result);
+  res.status(502).json({ ...result, error: result.message });
 }
 
 async function saveSshCredentials(req, res) {
@@ -111,6 +135,6 @@ async function deleteGithubToken(req, res) {
 
 module.exports = {
   getSettings,
-  saveSshCredentials, testSshConnection, deleteSshCredentials,
+  saveSshCredentials, testSshConnection, testOutboundTcp, deleteSshCredentials,
   saveGithubToken,    deleteGithubToken,
 };

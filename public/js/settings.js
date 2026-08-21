@@ -101,6 +101,21 @@ document.getElementById('testSshBtn').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('testTcpBtn').addEventListener('click', async () => {
+  const button = document.getElementById('testTcpBtn');
+  button.disabled = true;
+  button.textContent = 'Testing Railway…';
+  try {
+    const result = await apiFetch('/api/settings/ssh-credentials/test-tcp', { method: 'POST', body: '{}' });
+    showToast(`${result.message} (${result.elapsedMs} ms)`, 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Test Railway TCP';
+  }
+});
+
 document.getElementById('removeSshBtn').addEventListener('click', async () => {
   if (!confirm('Remove SSH credentials? You will not be able to deploy until you re-add them.')) return;
   try {

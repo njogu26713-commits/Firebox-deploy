@@ -51,7 +51,7 @@
           <div>
             <div class="settings-card-title">🖥 VPS / SSH</div>
             <div class="settings-card-sub">
-              Connection details for your server. Firebox will SSH in to clone, install, build, and manage PM2 processes on your behalf.
+              Connection details for your server. Firebox will SSH in to clone, install, build, and manage PM2 processes on your behalf.<br><span class="field-hint">Use “Test Railway TCP” to check whether the deployed Firebox backend can reach the VPS SSH port before testing credentials.</span>
             </div>
           </div>
           <div class="token-badge" id="sshBadge">—</div>
@@ -106,7 +106,8 @@
 
           <div class="gap-8">
             <button class="btn btn-primary btn-sm" id="saveSshBtn">Save connection</button>
-            <button class="btn btn-ghost btn-sm" id="testSshBtn" type="button">Test connection</button>
+            <button class="btn btn-ghost btn-sm" id="testSshBtn" type="button">Test SSH</button>
+            <button class="btn btn-ghost btn-sm" id="testTcpBtn" type="button">Test Railway TCP</button>
             <button class="btn btn-ghost btn-sm" id="removeSshBtn" style="display:none;">Remove</button>
           </div>
         </div>
