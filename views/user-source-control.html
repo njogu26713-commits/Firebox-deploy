@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebox — New Project</title>
+<link rel="stylesheet" href="/css/style.css" />
+<script src="/js/theme.js"></script>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">🔥</div>
+      <div class="brand-name">Firebox<span>Deploy</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-item" onclick="location.href='/app/home'"><span class="nav-icon">⌂</span> Home</div>
+      <div class="nav-item" onclick="location.href='/app/projects'"><span class="nav-icon">▢</span> Projects</div>
+      <div class="nav-item active" onclick="location.href='/app/source-control'"><span class="nav-icon">⌘</span> Source Control</div>
+      <div class="nav-item" onclick="location.href='/app/history'"><span class="nav-icon">◷</span> History</div>
+      <div class="nav-item" onclick="location.href='/app/deploy'"><span class="nav-icon">⚡</span> Deploy</div>
+      <div class="nav-item" onclick="location.href='/app/settings'"><span class="nav-icon">⚙</span> Settings</div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost btn-sm" onclick="location.href='/app/projects'" style="justify-content:center;">← Back</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>New Project</h1>
+        <div class="topbar-sub">Import a GitHub repository and deploy it to your VPS via SSH.</div>
+      </div>
+    </div>
+
+    <div class="content" style="max-width:660px;">
+      <form id="newProjectForm">
+
+        <div class="field">
+          <label>Project type</label>
+          <div class="type-picker" id="typePicker">
+            <div class="type-option selected" data-type="node-app"><div class="icon">🟢</div><div class="label">Node App</div></div>
+            <div class="type-option" data-type="api"><div class="icon">🔌</div><div class="label">API</div></div>
+            <div class="type-option" data-type="website"><div class="icon">🌐</div><div class="label">Website</div></div>
+            <div class="type-option" data-type="bot-whatsapp"><div class="icon">💬</div><div class="label">WA Bot</div></div>
+            <div class="type-option" data-type="bot-telegram"><div class="icon">✈️</div><div class="label">TG Bot</div></div>
+            <div class="type-option" data-type="bot-discord"><div class="icon">🎮</div><div class="label">Discord Bot</div></div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="name">Project name</label>
+          <input id="name" placeholder="e.g. My API" required />
+        </div>
+
+        <div class="field">
+          <label>GitHub repository</label>
+          <div class="repo-picker-row gap-8">
+            <select id="repoSelect" style="flex:1;">
+              <option value="">— Click "Load repos" to pick from your account —</option>
+            </select>
+            <button type="button" class="btn btn-sm" id="loadReposBtn">↻ Load repos</button>
+          </div>
+          <div class="field-hint">No GitHub token? <a href="/app/settings" style="color:var(--ember);">Add one in Settings</a> first.</div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="branch">Branch</label>
+            <input id="branch" value="main" />
+          </div>
+          <div class="field">
+            <label for="rootDirectory">Root directory</label>
+            <input id="rootDirectory" value="." />
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="buildCommand">Build command <span class="detect-badge" style="display:none;"></span></label>
+            <input id="buildCommand" placeholder="e.g. npm run build" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="startCommand">Start command <span class="detect-badge" style="display:none;"></span></label>
+            <input id="startCommand" placeholder="e.g. npm start" autocomplete="off" />
+          </div>
+        </div>
+
+        <div class="field" id="frameworkRow" style="margin-top:-8px;">
+          <span id="frameworkBadge" class="framework-badge" style="display:none;"></span>
+        </div>
+
+        <div class="field">
+          <label for="deployPath">Deploy path on VPS <span style="opacity:.5;font-weight:normal;">(optional)</span></label>
+          <input id="deployPath" placeholder="e.g. /opt/apps/my-app  — leave blank to auto-derive" autocomplete="off" />
+          <div class="field-hint">Leave blank to use <code>&lt;deploy root&gt;/&lt;project-slug&gt;</code> from your SSH settings.</div>
+        </div>
+
+        <div class="field">
+          <label for="vpsUrl">App URL <span style="opacity:.5;font-weight:normal;">(optional)</span></label>
+          <input id="vpsUrl" placeholder="https://app.yourdomain.com" autocomplete="off" />
+          <div class="field-hint">The public URL of your app once it's running. You can add or update this later.</div>
+        </div>
+
+        <div class="field">
+          <label>Environment variables</label>
+          <div id="envRows"></div>
+          <button type="button" class="btn btn-sm btn-ghost" id="addEnvRow">+ Add variable</button>
+        </div>
+
+        <div id="formError" class="auth-error" style="margin-top:12px;"></div>
+
+        <div class="gap-8 mt-24">
+          <button type="submit" class="btn btn-primary" id="submitBtn">Create Project</button>
+          <button type="button" class="btn btn-ghost" onclick="location.href='/app/projects'">Cancel</button>
+        </div>
+
+      </form>
+    </div>
+  </main>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/socket-client.js"></script>
+<script src="/js/new-project.js"></script>
+</body>
+</html>

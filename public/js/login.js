@@ -21,7 +21,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     }
 
     if (data.token) localStorage.setItem('firebox_token', data.token);
-    window.location.href = '/dashboard';
+    window.location.href = '/app/home';
   } catch (err) {
     errorBox.textContent = 'Could not reach the server. Please try again.';
     errorBox.style.display = 'block';

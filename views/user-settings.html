@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebox — Settings</title>
+<link rel="stylesheet" href="/css/style.css" />
+<script src="/js/theme.js"></script>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">🔥</div>
+      <div class="brand-name">Firebox<span>Deploy</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-item" onclick="location.href='/app/home'"><span class="nav-icon">⌂</span> Home</div>
+      <div class="nav-item" onclick="location.href='/app/projects'"><span class="nav-icon">▢</span> Projects</div>
+      <div class="nav-item" onclick="location.href='/app/source-control'"><span class="nav-icon">⌘</span> Source Control</div>
+      <div class="nav-item" onclick="location.href='/app/history'"><span class="nav-icon">◷</span> History</div>
+      <div class="nav-item" onclick="location.href='/app/deploy'"><span class="nav-icon">⚡</span> Deploy</div>
+      <div class="nav-item active" onclick="location.href='/app/settings'"><span class="nav-icon">⚙</span> Settings</div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <span>👤</span>
+        <div>
+          <strong id="userName">—</strong>
+          <span id="userEmail">—</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="logoutBtn" style="justify-content:center;">Log out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Settings</h1>
+        <div class="topbar-sub">Configure your VPS connection to enable SSH deployments.</div>
+      </div>
+    </div>
+
+    <div class="content" style="max-width:640px;">
+
+      <!-- ── VPS / SSH ───────────────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <div class="settings-card-title">🖥 VPS / SSH</div>
+            <div class="settings-card-sub">
+              Connection details for your server. Firebox will SSH in to clone, install, build, and manage PM2 processes on your behalf.
+            </div>
+          </div>
+          <div class="token-badge" id="sshBadge">—</div>
+        </div>
+
+        <div id="sshForm">
+          <div class="row">
+            <div class="field" style="flex:3;">
+              <label for="sshHost">Host / IP</label>
+              <input id="sshHost" placeholder="203.0.113.1 or server.example.com" autocomplete="off" />
+            </div>
+            <div class="field" style="flex:1;">
+              <label for="sshPort">Port</label>
+              <input id="sshPort" type="number" value="22" min="1" max="65535" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="sshUsername">Username</label>
+            <input id="sshUsername" placeholder="root" autocomplete="off" />
+          </div>
+
+          <div class="field">
+            <label for="sshDeployRoot">Deploy root directory</label>
+            <input id="sshDeployRoot" value="/opt/apps" autocomplete="off" />
+            <div class="field-hint">Projects are cloned into <code>&lt;deploy root&gt;/&lt;project-slug&gt;</code> unless overridden per project.</div>
+          </div>
+
+          <div class="field">
+            <label>Authentication</label>
+            <div class="gap-8" style="margin-bottom:8px;">
+              <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                <input type="radio" name="sshAuthType" value="key" checked /> Private key
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                <input type="radio" name="sshAuthType" value="password" /> Password
+              </label>
+            </div>
+
+            <div id="keyField">
+              <textarea id="sshPrivateKey" rows="6"
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;…&#10;-----END OPENSSH PRIVATE KEY-----"
+                style="font-family:var(--mono);font-size:12px;resize:vertical;"
+                autocomplete="off"></textarea>
+              <div class="field-hint">Paste the full PEM private key. It is stored AES-256 encrypted and never sent to the client.</div>
+            </div>
+
+            <div id="passwordField" style="display:none;">
+              <input type="password" id="sshPassword" placeholder="SSH password" autocomplete="new-password" />
+            </div>
+          </div>
+
+          <div class="gap-8">
+            <button class="btn btn-primary btn-sm" id="saveSshBtn">Save connection</button>
+            <button class="btn btn-ghost btn-sm" id="removeSshBtn" style="display:none;">Remove</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── GitHub ──────────────────────────────────────────────────── -->
+      <div class="settings-card">
+        <div class="settings-card-head">
+          <div>
+            <div class="settings-card-title">🐙 GitHub</div>
+            <div class="settings-card-sub">A personal access token lets Firebox list your repositories in the New Project form and register push webhooks for auto-redeploy.</div>
+          </div>
+          <div class="token-badge" id="githubBadge">—</div>
+        </div>
+
+        <div id="githubForm">
+          <div class="field">
+            <label for="githubToken">Personal access token</label>
+            <input type="password" id="githubToken" placeholder="github_pat_..." autocomplete="new-password" />
+            <div class="field-hint">
+              Needs <code>repo</code> scope. Create at <a href="https://github.com/settings/tokens" target="_blank" rel="noopener" style="color:var(--ember);">github.com/app/settings/tokens</a>
+            </div>
+          </div>
+          <div class="gap-8">
+            <button class="btn btn-primary btn-sm" id="saveGithubBtn">Save token</button>
+            <button class="btn btn-ghost btn-sm" id="removeGithubBtn" style="display:none;">Remove</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/socket-client.js"></script>
+<script src="/js/settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebox — Dashboard</title>
+<link rel="stylesheet" href="/css/style.css" />
+<script src="/js/theme.js"></script>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">🔥</div>
+      <div class="brand-name">Firebox<span>Deploy</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-item" onclick="location.href='/app/home'"><span class="nav-icon">⌂</span> Home</div>
+      <div class="nav-item active" onclick="location.href='/app/projects'"><span class="nav-icon">▢</span> Projects</div>
+      <div class="nav-item" onclick="location.href='/app/source-control'"><span class="nav-icon">⌘</span> Source Control</div>
+      <div class="nav-item" onclick="location.href='/app/history'"><span class="nav-icon">◷</span> History</div>
+      <div class="nav-item" onclick="location.href='/app/deploy'"><span class="nav-icon">⚡</span> Deploy</div>
+      <div class="nav-item" onclick="location.href='/app/settings'"><span class="nav-icon">⚙</span> Settings</div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <span>👤</span>
+        <div>
+          <strong id="userName">—</strong>
+          <span id="userEmail">—</span>
+        </div>
+      </div>
+      <div id="sshWarning" class="token-warning" style="display:none;">
+        ⚠ No VPS configured. <a href="/app/settings">Add SSH credentials in Settings.</a>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="logoutBtn" style="justify-content:center;">Log out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Projects</h1>
+        <div class="topbar-sub" id="projectCount">Loading…</div>
+      </div>
+      <div class="gap-8">
+        <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ Refresh</button>
+        <button class="btn btn-primary btn-sm" onclick="location.href='/app/source-control'">＋ New Project</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <div id="projectsGrid" class="grid"></div>
+      <div id="emptyState" class="empty" style="display:none;">
+        <h3>No projects yet</h3>
+        <p>Import a GitHub repository and deploy it to your VPS via SSH.</p>
+        <button class="btn btn-primary" onclick="location.href='/app/source-control'">＋ Import Repository</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/socket-client.js"></script>
+<script src="/js/dashboard.js"></script>
+</body>
+</html>
