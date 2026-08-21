@@ -20,6 +20,8 @@ router.get('/github/oauth/callback', githubCtrl.oauthCallback);
 router.put('/github-connection', ctrl.saveGithubConnection);
 router.post('/github/import', ctrl.importGithubRepository);
 router.post('/projects', ctrl.addProject);
+router.get('/projects/:projectId/secrets', ctrl.getProjectSecrets);
+router.put('/projects/:projectId/secrets', ctrl.saveProjectSecrets);
 router.post('/projects/:projectId/deploy', ctrl.deployProject);
 router.get('/projects/:projectId/deployments/:deploymentId', ctrl.getDeploymentStatus);
 router.post('/projects/upload', upload.array('files', 500), ctrl.addUploadedProject);

@@ -226,6 +226,17 @@ input::placeholder { color: var(--muted-2); }
 
 .env-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
 .env-row input { font-family: var(--font-mono); font-size: 12.5px; }
+.user-secrets-panel { margin-top: 16px; }
+.user-secrets-panel .form-title small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.user-secrets-note { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+.user-secret-row { align-items: center; }
+.user-secret-row .env-key { flex: 0 1 210px; }
+.user-secret-row .env-value { flex: 1 1 280px; }
+.secret-remove { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.secret-remove input { width: auto; }
+.remove-secret-row { min-width: 32px; padding-inline: 8px; }
+.user-secrets-actions { display: flex; gap: 8px; margin-left: auto; }
+
 
 /* ── Terminal / logs ──────────────────────────────────────────────── */
 

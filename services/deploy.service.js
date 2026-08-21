@@ -62,8 +62,12 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+function runtimeEnvVars(project) {
+  return (project.envVars || []).map((item) => ({ ...item, value: item.encrypted && String(item.value || '').includes(':') ? cryptoSvc.decrypt(item.value) : String(item.value || '') })).filter((item) => item.key && item.value !== '');
+}
+
 function projectPort(project) {
-  const envPort = (project.envVars || []).find((item) => item.key === 'PORT')?.value;
+  const envPort = runtimeEnvVars(project).find((item) => item.key === 'PORT')?.value;
   const port = Number(project.vpsPort || envPort || 3000);
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 3000;
 }
@@ -114,6 +118,7 @@ function generatedNodeDockerfile(project, port) {
 }
 
 async function runAzureAgentPipeline(project, deployment, log) {
+  project = { ...project, envVars: runtimeEnvVars(project) };
   const token = project.githubToken ? cryptoSvc.decrypt(project.githubToken) : '';
   if (!token) throw new Error('The project has no encrypted GitHub token available for Azure Agent deployment.');
   const [owner, repo] = agentRepositoryRef(project);
@@ -181,6 +186,7 @@ async function healthCheck(conn, port, healthPath, log) {
 }
 
 async function runDockerPipeline(conn, project, workDir, log) {
+  project = { ...project, envVars: runtimeEnvVars(project) };
   const port = projectPort(project);
   const healthPath = safeHealthPath(project.healthPath);
   const quotedPath = shellQuote(workDir);
@@ -217,6 +223,7 @@ async function runDockerPipeline(conn, project, workDir, log) {
  * Called in the background after a Deployment record is created.
  */
 async function runDeployPipeline(project, deployment) {
+  project = { ...project, envVars: runtimeEnvVars(project) };
   const logBuffer = [];
   const pendingLogWrites = [];
 

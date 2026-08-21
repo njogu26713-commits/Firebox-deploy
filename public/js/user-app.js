@@ -2,6 +2,7 @@ function escapeHtml(value) { const el = document.createElement('textarea'); el.t
 
 let activeUserDeploymentId = '';
 let activeUserProjectId = '';
+let activeUserSecretsProjectId = '';
 let hydratedUserDeploymentId = '';
 
 const userSections = {
@@ -44,7 +45,7 @@ function setIdentity() {
 function userProjectCard(project) {
   const deployable = project.sourceType !== 'upload';
   const currentStatus = project.lastDeploymentId ? 'Deploy again' : 'Deploy this project';
-  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">${escapeHtml(project.framework || 'User workspace project')}</div></div><div class="beacon"><span class="beacon-dot"></span>${escapeHtml(project.lastDeploymentId ? 'deployment available' : 'connected')}</div></div><div class="project-domain">${escapeHtml(project.repoUrl)}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.branch || 'main')}</b></span><span>Target <b>Azure Agent HTTPS</b></span></div><div class="project-card-actions">${deployable ? `<button class="btn btn-primary btn-sm user-deploy-project" data-project-id="${project._id}" data-target="azure-agent">${currentStatus} →</button>` : '<span class="text-muted project-upload-note">Connect GitHub to deploy</span>'}</div></div>`;
+  return `<div class="card project-card"><div class="project-card-head"><div><div class="project-name">${escapeHtml(project.name)}</div><div class="project-type">${escapeHtml(project.framework || 'User workspace project')}</div></div><div class="beacon"><span class="beacon-dot"></span>${escapeHtml(project.lastDeploymentId ? 'deployment available' : 'connected')}</div></div><div class="project-domain">${escapeHtml(project.repoUrl)}</div><div class="project-meta"><span>Branch <b>${escapeHtml(project.branch || 'main')}</b></span><span>Target <b>Azure Agent HTTPS</b></span></div><div class="project-card-actions">${deployable ? `<button class="btn btn-primary btn-sm user-deploy-project" data-project-id="${project._id}" data-target="azure-agent">${currentStatus} →</button><button class="btn btn-ghost btn-sm user-secrets-project" data-project-id="${project._id}" type="button">Secrets</button>` : '<span class="text-muted project-upload-note">Connect GitHub to deploy</span>'}</div></div>`;
 }
 
 function showUserDeploymentConsole(project, deploymentId, status = 'queued') {
@@ -105,8 +106,57 @@ async function deployUserProject(projectId, button) {
   } catch (err) { showToast(err.message, 'error'); button.disabled = false; button.textContent = 'Deploy this project →'; }
 }
 
+function createUserSecretRow(item = {}) {
+  const row = document.createElement('div');
+  row.className = 'env-row user-secret-row';
+  row.innerHTML = '<input class="env-key" placeholder="KEY_NAME" autocomplete="off"><input class="env-value" type="password" placeholder="Enter value" autocomplete="new-password"><label class="secret-remove"><input class="remove-secret" type="checkbox"> Remove</label><button class="btn btn-ghost btn-sm remove-secret-row" type="button" aria-label="Remove row">×</button>';
+  row.querySelector('.env-key').value = item.key || '';
+  row.querySelector('.env-value').placeholder = item.configured ? 'Saved value · leave blank to keep' : 'Enter value';
+  row.dataset.configured = item.configured ? 'true' : 'false';
+  row.querySelector('.remove-secret-row').addEventListener('click', () => row.remove());
+  return row;
+}
+
+function addUserSecretRow(item = {}) { document.getElementById('userSecretsRows').appendChild(createUserSecretRow(item)); }
+
+async function openUserSecrets(projectId) {
+  const project = (window.fireboxUserProjects || []).find((item) => String(item._id) === String(projectId));
+  if (!project) return;
+  activeUserSecretsProjectId = String(projectId);
+  document.getElementById('userSecretsPanel').style.display = 'block';
+  document.getElementById('userSecretsRows').innerHTML = '';
+  document.getElementById('userSecretsMessage').style.display = 'none';
+  document.querySelector('#userSecretsPanel .form-title strong').textContent = `Secrets / Environment Variables · ${project.name}`;
+  try {
+    const { envVars } = await userFetch(`/api/user/workspace/projects/${projectId}/secrets`);
+    (envVars || []).forEach(addUserSecretRow);
+    if (!envVars?.length) addUserSecretRow();
+    document.getElementById('userSecretsPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (err) { showFormMessage('userSecretsMessage', err.message, true); }
+}
+
+async function saveUserSecrets() {
+  if (!activeUserSecretsProjectId) return;
+  const button = document.getElementById('saveUserSecrets');
+  button.disabled = true;
+  try {
+    const envVars = Array.from(document.querySelectorAll('#userSecretsRows .user-secret-row')).map((row) => ({
+      key: row.querySelector('.env-key').value.trim(),
+      value: row.querySelector('.env-value').value,
+      remove: row.querySelector('.remove-secret').checked,
+    }));
+    const result = await userFetch(`/api/user/workspace/projects/${activeUserSecretsProjectId}/secrets`, { method: 'PUT', body: JSON.stringify({ envVars }) });
+    document.getElementById('userSecretsRows').innerHTML = '';
+    (result.envVars || []).forEach(addUserSecretRow);
+    if (!result.envVars?.length) addUserSecretRow();
+    showFormMessage('userSecretsMessage', 'Secrets saved securely. Existing values remain hidden.', false);
+  } catch (err) { showFormMessage('userSecretsMessage', err.message, true); } finally { button.disabled = false; }
+}
+
 function bindDeployButtons(container) {
   container.addEventListener('click', (event) => {
+    const secretsButton = event.target.closest('.user-secrets-project');
+    if (secretsButton) { event.preventDefault(); showUserSection('deploy'); openUserSecrets(secretsButton.dataset.projectId); return; }
     const button = event.target.closest('.user-deploy-project');
     if (button) deployUserProject(button.dataset.projectId, button);
   });
@@ -173,6 +223,8 @@ function renderUserHistory(records) {
 }
 async function loadUserHistory() { await loadWorkspace(); }
 document.getElementById('refreshUserHistory').addEventListener('click', loadUserHistory);
+document.getElementById('addUserSecret').addEventListener('click', () => addUserSecretRow());
+document.getElementById('saveUserSecrets').addEventListener('click', saveUserSecrets);
 
 document.getElementById('chooseGithubOAuth').addEventListener('click', () => {
   document.getElementById('githubConnectionForm').style.display = 'none';

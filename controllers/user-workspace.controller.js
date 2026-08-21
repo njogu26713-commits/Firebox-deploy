@@ -15,7 +15,7 @@ function sessionKey(req) {
 async function getWorkspace(req, res, next) {
   try {
     const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) }).lean();
-    res.json({ workspace: workspace || { projects: [], activity: [] } });
+    res.json({ workspace: sanitizeWorkspace(workspace) });
   } catch (err) { next(err); }
 }
 
@@ -87,7 +87,54 @@ async function addProject(req, res, next) {
       { $setOnInsert: { sessionKey: sessionKey(req) }, $push: { projects: { name, repoUrl, branch, provider } } },
       { upsert: true, new: true, runValidators: true }
     ).lean();
-    res.status(201).json({ workspace });
+    res.status(201).json({ workspace: sanitizeWorkspace(workspace) });
+  } catch (err) { next(err); }
+}
+
+function publicEnvVars(project) {
+  return (project?.envVars || []).map((item) => ({ key: item.key, secret: true, configured: true }));
+}
+
+function sanitizeWorkspace(workspace) {
+  const value = workspace?.toObject ? workspace.toObject() : (workspace || { projects: [], activity: [] });
+  return { ...value, projects: (value.projects || []).map((project) => ({ ...project, envVars: publicEnvVars(project) })) };
+}
+
+async function getProjectSecrets(req, res, next) {
+  try {
+    const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) }).lean();
+    const project = workspace?.projects.find((item) => String(item._id) === String(req.params.projectId));
+    if (!project) return res.status(404).json({ error: 'User project not found.' });
+    res.json({ envVars: publicEnvVars(project) });
+  } catch (err) { next(err); }
+}
+
+async function saveProjectSecrets(req, res, next) {
+  try {
+    const workspace = await UserWorkspace.findOne({ sessionKey: sessionKey(req) });
+    const project = workspace?.projects.id(req.params.projectId);
+    if (!project) return res.status(404).json({ error: 'User project not found.' });
+    if (!Array.isArray(req.body.envVars)) return res.status(400).json({ error: 'envVars must be an array.' });
+    const current = new Map((project.envVars || []).map((item) => [item.key, item]));
+    const nextVars = [];
+    const seen = new Set();
+    for (const raw of req.body.envVars.slice(0, 100)) {
+      const key = String(raw?.key || '').trim();
+      const value = typeof raw?.value === 'string' ? raw.value : '';
+      if (!key && !raw?.remove) continue;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return res.status(400).json({ error: `Invalid environment variable name: ${key}` });
+      if (seen.has(key)) return res.status(400).json({ error: `Duplicate environment variable: ${key}` });
+      seen.add(key);
+      if (raw.remove) continue;
+      const existing = current.get(key);
+      if (!value && existing) nextVars.push({ key, value: existing.value, secret: true, encrypted: true });
+      else if (value) nextVars.push({ key, value: encrypt(value), secret: true, encrypted: true });
+      else return res.status(400).json({ error: `Enter a value for ${key}, or remove it.` });
+    }
+    project.envVars = nextVars;
+    await workspace.save();
+    if (project.deploymentProjectId) await Project.findByIdAndUpdate(project.deploymentProjectId, { $set: { envVars: nextVars } });
+    res.json({ envVars: publicEnvVars(project), message: 'Secrets saved securely.' });
   } catch (err) { next(err); }
 }
 
@@ -103,7 +150,7 @@ async function addUploadedProject(req, res, next) {
       { $setOnInsert: { sessionKey: sessionKey(req) }, $push: { projects: { name, repoUrl: `uploaded://${name}`, branch: 'local', provider, sourceType: 'upload', uploadedFileCount: files.length, uploadPath: files[0].destination || '' } } },
       { upsert: true, new: true, runValidators: true }
     ).lean();
-    res.status(201).json({ workspace, uploadedFileCount: files.length });
+    res.status(201).json({ workspace: sanitizeWorkspace(workspace), uploadedFileCount: files.length });
   } catch (err) { next(err); }
 }
 
@@ -137,7 +184,7 @@ async function deployProject(req, res, next) {
       let slug = `user-${baseSlug}`;
       let suffix = 1;
       while (await Project.exists({ slug })) { slug = `user-${baseSlug}-${suffix++}`; }
-      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: projectType, deploymentTarget, githubRepoFullName: `${githubMatch[1]}/${githubMatch[2]}`, repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', packageManager: project.packageManager || 'npm', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
+      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: projectType, deploymentTarget, githubRepoFullName: `${githubMatch[1]}/${githubMatch[2]}`, repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', packageManager: project.packageManager || 'npm', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug, envVars: project.envVars || [] });
       project.deploymentProjectId = deploymentProject._id;
     } else {
       deploymentProject.type = projectType;
@@ -149,6 +196,7 @@ async function deployProject(req, res, next) {
       deploymentProject.packageManager = project.packageManager || 'npm';
       deploymentProject.buildCommand = project.buildCommand || '';
       deploymentProject.startCommand = project.startCommand || '';
+      deploymentProject.envVars = project.envVars || [];
       await deploymentProject.save();
     }
     const { deploymentId } = await deployService.triggerDeploy(deploymentProject, 'manual');
@@ -185,8 +233,8 @@ async function recordDeployment(req, res, next) {
       { $setOnInsert: { sessionKey: sessionKey(req) }, $push: { activity: { projectName, provider, status: 'requested' } } },
       { upsert: true, new: true, runValidators: true }
     ).lean();
-    res.status(201).json({ workspace });
+    res.status(201).json({ workspace: sanitizeWorkspace(workspace) });
   } catch (err) { next(err); }
 }
 
-module.exports = { getWorkspace, listGithubRepositories, inspectGithubRepository, getGithubConnection, saveGithubConnection, importGithubRepository, addProject, addUploadedProject, deployProject, getDeploymentStatus, recordDeployment };
+module.exports = { getWorkspace, listGithubRepositories, inspectGithubRepository, getGithubConnection, saveGithubConnection, importGithubRepository, addProject, addUploadedProject, getProjectSecrets, saveProjectSecrets, deployProject, getDeploymentStatus, recordDeployment };

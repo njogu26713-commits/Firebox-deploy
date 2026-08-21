@@ -1,5 +1,12 @@
 const mongoose = require('mongoose');
 
+const UserEnvVarSchema = new mongoose.Schema({
+  key: { type: String, required: true, trim: true, maxlength: 128 },
+  value: { type: String, required: true },
+  secret: { type: Boolean, default: true },
+  encrypted: { type: Boolean, default: true },
+}, { _id: false });
+
 const UserWorkspaceSchema = new mongoose.Schema(
   {
     sessionKey: { type: String, required: true, unique: true, index: true },
@@ -24,6 +31,7 @@ const UserWorkspaceSchema = new mongoose.Schema(
       buildCommand: { type: String, default: '' },
       startCommand: { type: String, default: '' },
       detectedFiles: { type: [String], default: [] },
+      envVars: { type: [UserEnvVarSchema], default: [] },
       createdAt: { type: Date, default: Date.now },
     }],
     activity: [{
