@@ -9,12 +9,13 @@ const views = (file) => path.join(__dirname, '..', 'views', file);
 router.get('/', (req, res) => res.sendFile(views('landing.html')));
 
 router.get('/user-login',    (req, res) => res.sendFile(views('user-login.html')));
+router.get('/user',          (req, res) => res.sendFile(views('user-app.html')));
 router.get('/login',         (req, res) => {
   if (config.authDisabled || req.session.userId) return res.redirect('/dashboard');
   res.sendFile(views('login.html'));
 });
 
-router.get('/home',              requirePageAuth, (req, res) => res.sendFile(views('home.html')));
+router.get('/home',              (req, res) => res.sendFile(views('user-app.html')));
 router.get('/dashboard',         requirePageAuth, (req, res) => res.sendFile(views('dashboard.html')));
 router.get('/projects/new',      requirePageAuth, (req, res) => res.sendFile(views('new-project.html')));
 router.get('/deploy',            requirePageAuth, (req, res) => res.sendFile(views('deploy.html')));
