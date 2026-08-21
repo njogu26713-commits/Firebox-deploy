@@ -35,13 +35,13 @@ function normalizeError(error, operation) {
   const normalized = new Error(
     status === 401 || status === 403 ? `Azure Agent authentication failed during ${safeOperation}.` :
     status === 404 ? `Azure Agent endpoint was not found during ${safeOperation}.` :
-    status === 400 ? `Azure Agent rejected the ${safeOperation} request${remoteMessage ? `: ${remoteMessage}` : '.'}` :
+    status === 400 || status === 422 ? `Azure Agent rejected the ${safeOperation} request${remoteMessage ? `: ${remoteMessage}` : '.'}` :
     status === 429 ? `Azure Agent rate limit reached during ${safeOperation}. Try again shortly.` :
     status >= 500 ? `Azure Agent returned a server error during ${safeOperation}.` :
     error?.code === 'ECONNABORTED' || /timeout/i.test(error?.message || '') ? `Azure Agent request timed out during ${safeOperation}.` :
     `Azure Agent is unavailable during ${safeOperation}.`);
   normalized.code = status ? `AZURE_AGENT_HTTP_${status}` : (error?.code || 'AZURE_AGENT_UNAVAILABLE');
-  normalized.statusCode = status === 401 || status === 403 ? 502 : status === 400 ? 400 : status === 404 ? 502 : status === 429 ? 503 : 502;
+  normalized.statusCode = status === 401 || status === 403 ? 502 : status === 400 || status === 422 ? 400 : status === 404 ? 502 : status === 429 ? 503 : 502;
   normalized.cause = error;
   return normalized;
 }
