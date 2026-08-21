@@ -15,6 +15,8 @@ const User       = require('../models/User');
 const logger     = require('./logger.service');
 const cryptoSvc  = require('./crypto.service');
 const sshSvc     = require('./ssh.service');
+const azureAgent  = require('./azureAgent.service');
+const { downloadRepositoryFiles } = require('./user-github.service');
 const {
   detectPackageManager,
   getPackageManagerCommands,
@@ -69,6 +71,52 @@ function projectPort(project) {
 function safeHealthPath(path) {
   const value = String(path || '/').trim();
   return value.startsWith('/') && !/[\n\r\s]/.test(value) ? value : '/';
+}
+
+function agentRepositoryRef(project) {
+  const fullName = String(project.githubRepoFullName || '').trim();
+  if (/^[^/]+\/[^/]+$/.test(fullName)) return fullName.split('/');
+  const match = String(project.repoUrl || '').match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?$/i);
+  if (!match) throw new Error('A GitHub repository reference is required for Azure Agent deployment.');
+  return [match[1], match[2]];
+}
+
+async function runAzureAgentPipeline(project, deployment, log) {
+  const token = project.githubToken ? cryptoSvc.decrypt(project.githubToken) : '';
+  if (!token) throw new Error('The project has no encrypted GitHub token available for Azure Agent deployment.');
+  const [owner, repo] = agentRepositoryRef(project);
+  const branch = project.githubBranch || 'main';
+  const files = await downloadRepositoryFiles(token, owner, repo, branch);
+  log('info', `[2/4] Transferring ${files.length} repository files to the Azure Agent…`);
+  await azureAgent.createProject(project.slug);
+  for (const file of files) await azureAgent.writeFile(project.slug, file.path, file.content);
+  if (project.envVars && project.envVars.length) {
+    const envContent = project.envVars.filter((item) => item.key).map((item) => `${item.key}=${item.value}`).join('\\n') + '\\n';
+    await azureAgent.writeFile(project.slug, '.env', envContent);
+    log('info', `✓ Environment file transferred (${project.envVars.length} variables)`);
+  }
+  const runtime = project.type === 'docker' ? 'docker' : '';
+  if (runtime !== 'docker') throw new Error('Azure Agent deployment currently requires a Docker project.');
+  log('info', '[3/4] Starting controlled Docker deployment on the Azure Agent…');
+  const started = await azureAgent.deploy(project.slug, { runtime, port: projectPort(project) });
+  log('info', `✓ Azure Agent job ${started.jobId} queued`);
+  let seenLogs = 0;
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const result = await azureAgent.jobStatus(started.jobId);
+    const job = result.job || result;
+    const logs = Array.isArray(job.logs) ? job.logs : [];
+    for (const entry of logs.slice(seenLogs)) log(entry.level || 'info', entry.message || '');
+    seenLogs = logs.length;
+    if (job.status === 'succeeded') {
+      log('info', '[4/4] Azure Agent reports the container is running.');
+      deployment.meta = { ...(deployment.meta || {}), server: 'firebox-azure-agent', runtime: 'docker', agentJobId: started.jobId, port: projectPort(project) };
+      return started.jobId;
+    }
+    if (job.status === 'failed') throw new Error(job.error || 'Azure Agent deployment failed.');
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error('Azure Agent deployment timed out while waiting for the job to complete.');
 }
 
 async function configureReverseProxy(conn, project, deployPath, port, log) {
@@ -146,7 +194,23 @@ async function runDeployPipeline(project, deployment) {
   let conn;
 
   try {
-    // ── Step 1: Connect ──────────────────────────────────────────────────
+    // ── Step 1: Select the Azure Agent or legacy SSH transport ───────────
+    // Docker projects use the authenticated HTTPS agent when configured. The
+    // existing SSH path remains available for non-Docker projects so current
+    // deployments are preserved while the migration is staged safely.
+    if (project.type === 'docker' && azureAgent.getConfigStatus().configured) {
+      await logger.setStatus(deployment, 'building');
+      deployment.status = 'building';
+      await runAzureAgentPipeline(project, deployment, log);
+      deployment.url = project.vpsUrl || '';
+      log('info', 'DEPLOYMENT SUCCESSFUL');
+      await Promise.all(pendingLogWrites);
+      deployment.logs = logBuffer;
+      await logger.setStatus(deployment, 'success');
+      await Project.findByIdAndUpdate(project._id, { status: 'success', lastDeployedAt: new Date(), vpsUrl: project.vpsUrl || '', setupError: '' });
+      return;
+    }
+
     const creds = await getSshCredentials(project);
     const deployPath = resolveDeployPath(project, creds);
     const githubToken = project.githubToken ? cryptoSvc.decrypt(project.githubToken) : '';

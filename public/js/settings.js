@@ -125,6 +125,21 @@ document.getElementById('outboundIpBtn').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('testAzureAgentBtn').addEventListener('click', async () => {
+  const button = document.getElementById('testAzureAgentBtn');
+  button.disabled = true;
+  button.textContent = 'Testing Agent…';
+  try {
+    const result = await apiFetch('/api/settings/azure-agent/test', { method: 'POST', body: '{}' });
+    showToast(`Azure Agent connected: ${result.service} (${result.status})`, 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Test Azure Agent';
+  }
+});
+
 document.getElementById('removeSshBtn').addEventListener('click', async () => {
   if (!confirm('Remove SSH credentials? You will not be able to deploy until you re-add them.')) return;
   try {

@@ -6,6 +6,7 @@ const config = require('../config/config');
 const deployService = require('../services/deploy.service');
 const githubService = require('../services/user-github.service');
 const { encrypt } = require('../services/crypto.service');
+const azureAgent = require('../services/azureAgent.service');
 
 function sessionKey(req) {
   return `user:${req.userAccountId}`;
@@ -117,7 +118,9 @@ async function deployProject(req, res, next) {
     if (project.sourceType === 'upload') return res.status(400).json({ error: 'Folder uploads are saved in your workspace, but VPS deployment currently requires a GitHub repository.' });
     const admin = await User.findOne({ $or: [{ email: config.adminEmail.toLowerCase() }, { role: 'owner' }] });
     if (!admin) return res.status(503).json({ error: 'Admin deployment settings are not configured.' });
-    if (!admin.sshHost || !admin.sshUsername || (!admin.sshPrivateKey && !admin.sshPassword)) return res.status(503).json({ error: 'The admin must configure VPS SSH credentials in the admin Settings page first.' });
+    const projectType = (project.detectedFiles || []).includes('Dockerfile') ? 'docker' : 'node-app';
+    const agentConfigured = projectType === 'docker' && azureAgent.getConfigStatus().configured;
+    if (!agentConfigured && (!admin.sshHost || !admin.sshUsername || (!admin.sshPrivateKey && !admin.sshPassword))) return res.status(503).json({ error: 'The admin must configure VPS SSH credentials in the admin Settings page first, or configure the Azure Agent for Docker deployments.' });
     const githubMatch = String(project.repoUrl || '').match(/^https?:\/\/github\.com\/([^/]+)\/([^/#]+)(?:\.git)?(?:[#?].*)?$/i);
     if (!githubMatch) return res.status(400).json({ error: 'A GitHub repository is required for VPS deployment.' });
     try {
@@ -131,7 +134,7 @@ async function deployProject(req, res, next) {
       let slug = `user-${baseSlug}`;
       let suffix = 1;
       while (await Project.exists({ slug })) { slug = `user-${baseSlug}-${suffix++}`; }
-      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: (project.detectedFiles || []).includes('Dockerfile') ? 'docker' : 'node-app', repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
+      deploymentProject = await Project.create({ name: project.name, slug, owner: admin._id, type: projectType, repoUrl: project.repoUrl, githubBranch: project.branch || 'main', githubToken: workspace.githubToken || '', buildCommand: project.buildCommand || '', startCommand: project.startCommand || '', pm2Name: slug });
       project.deploymentProjectId = deploymentProject._id;
     } else {
       deploymentProject.repoUrl = project.repoUrl;

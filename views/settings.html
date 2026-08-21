@@ -51,7 +51,7 @@
           <div>
             <div class="settings-card-title">🖥 VPS / SSH</div>
             <div class="settings-card-sub">
-              Connection details for your server. Firebox will SSH in to clone, install, build, and manage PM2 processes on your behalf.<br><span class="field-hint">Use “Show Railway IP” to identify the backend’s outbound address for Azure allowlisting. “Test Railway TCP” checks whether that backend can reach the VPS SSH port.</span>
+              Connection details for your server. Firebox will SSH in to clone, install, build, and manage PM2 processes on your behalf.<br><span class="field-hint">Use “Test Azure Agent” to verify the HTTPS connection from Railway to the running Azure Agent. The Azure Agent secret stays server-side. “Test Railway TCP” checks the legacy direct VPS SSH path.</span>
             </div>
           </div>
           <div class="token-badge" id="sshBadge">—</div>
@@ -109,6 +109,7 @@
             <button class="btn btn-ghost btn-sm" id="testSshBtn" type="button">Test SSH</button>
             <button class="btn btn-ghost btn-sm" id="testTcpBtn" type="button">Test Railway TCP</button>
             <button class="btn btn-ghost btn-sm" id="outboundIpBtn" type="button">Show Railway IP</button>
+            <button class="btn btn-ghost btn-sm" id="testAzureAgentBtn" type="button">Test Azure Agent</button>
             <button class="btn btn-ghost btn-sm" id="removeSshBtn" style="display:none;">Remove</button>
           </div>
         </div>

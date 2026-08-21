@@ -28,6 +28,26 @@ function decodeContent(file) {
   return Buffer.from(file.content, 'base64').toString('utf8');
 }
 
+async function downloadRepositoryFiles(token, owner, repo, branch = 'main') {
+  if (!token) throw new Error('A GitHub token is required to transfer repository files.');
+  if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || !/^[a-zA-Z0-9_.-]+$/.test(repo)) throw new Error('Invalid GitHub repository identifier.');
+  const tree = await githubRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`, token);
+  if (tree.truncated) throw new Error('The repository is too large to transfer through the deployment API.');
+  const blobs = (tree.tree || []).filter((item) => item.type === 'blob' && item.mode !== '120000' && !item.path.startsWith('.git/'));
+  if (blobs.length > 500) throw new Error('The repository contains more than 500 files; reduce it before deploying through the Azure Agent.');
+  const files = [];
+  let totalBytes = 0;
+  for (const blob of blobs) {
+    const item = await githubRequest(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs/${encodeURIComponent(blob.sha)}`, token);
+    if (item.encoding !== 'base64' || typeof item.content !== 'string') throw new Error(`GitHub returned an unsupported file encoding for ${blob.path}.`);
+    const content = Buffer.from(item.content.replace(/\s/g, ''), 'base64').toString('utf8');
+    totalBytes += Buffer.byteLength(content, 'utf8');
+    if (totalBytes > 25 * 1024 * 1024) throw new Error('The repository exceeds the 25 MB transfer limit.');
+    files.push({ path: blob.path, content });
+  }
+  return files;
+}
+
 async function inspectRepository(workspace, owner, repo, branch = 'main') {
   const token = getToken(workspace);
   const encodedOwner = encodeURIComponent(owner);
@@ -47,4 +67,4 @@ async function inspectRepository(workspace, owner, repo, branch = 'main') {
   };
 }
 
-module.exports = { listRepositories, inspectRepository };
+module.exports = { listRepositories, inspectRepository, downloadRepositoryFiles };

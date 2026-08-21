@@ -5,6 +5,7 @@ const sshService = require('../services/ssh.service');
 const net = require('net');
 const dns = require('dns').promises;
 const axios = require('axios');
+const azureAgent = require('../services/azureAgent.service');
 
 async function getAdminUser(req) {
   const sessionId = req.session?.userId || req.userId;
@@ -78,6 +79,15 @@ async function testOutboundTcp(req, res) {
   });
   if (result.status === 'success') return res.json(result);
   res.status(502).json({ ...result, error: result.message });
+}
+
+async function testAzureAgentConnection(req, res) {
+  try {
+    const health = await azureAgent.health();
+    res.json({ success: true, connected: true, service: health.service, status: health.status });
+  } catch (err) {
+    res.status(err.statusCode || 502).json({ success: false, connected: false, error: err.message });
+  }
 }
 
 async function getOutboundIp(req, res) {
@@ -163,6 +173,6 @@ async function deleteGithubToken(req, res) {
 
 module.exports = {
   getSettings,
-  saveSshCredentials, testSshConnection, testOutboundTcp, getOutboundIp, deleteSshCredentials,
+  saveSshCredentials, testSshConnection, testOutboundTcp, getOutboundIp, testAzureAgentConnection, deleteSshCredentials,
   saveGithubToken,    deleteGithubToken,
 };
