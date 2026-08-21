@@ -12,7 +12,8 @@ const session    = require('express-session');
 const MongoStore = require('connect-mongo');
 const { Server: SocketIOServer } = require('socket.io');
 
-const config       = require('./config/config');
+const config = require('./config/config');
+const User = require('./models/User');
 const connectDB    = require('./config/db');
 const loggerService = require('./services/logger.service');
 const githubService = require('./services/github.service');
@@ -113,8 +114,25 @@ app.use(notFound);
 app.use(errorHandler);
 
 // ── Boot ───────────────────────────────────────────────────────────────────
+async function ensureAdminAccount() {
+  const email = config.adminEmail.toLowerCase().trim();
+  let admin = await User.findOne({ email });
+  if (!admin) {
+    admin = await User.findOne({ role: 'owner' });
+  }
+  if (!admin) {
+    await User.create({ name: 'Admin', email, password: config.adminPassword, role: 'owner' });
+    console.log(`[auth] Created admin account for ${email}`);
+  } else if (admin.email !== email) {
+    admin.email = email;
+    await admin.save();
+    console.log(`[auth] Synced owner account email to ${email}`);
+  }
+}
+
 async function start() {
   await connectDB();
+  await ensureAdminAccount();
   server.listen(config.port, '0.0.0.0', () => {
     console.log(`
 🔥 Firebox Deploy v2 running on port ${config.port} (${config.nodeEnv})
