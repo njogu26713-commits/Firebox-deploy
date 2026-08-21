@@ -1,7 +1,7 @@
 const UserWorkspace = require('../models/UserWorkspace');
 
 function sessionKey(req) {
-  return req.sessionID || req.session?.id || 'anonymous-user';
+  return `user:${req.userAccountId}`;
 }
 
 async function getWorkspace(req, res, next) {

@@ -87,6 +87,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ── API routes ─────────────────────────────────────────────────────────────
 app.use('/api/auth',        require('./routes/auth.routes'));
+app.use('/api/user-auth',    require('./routes/user-auth.routes'));
 app.use('/api/projects',    require('./routes/projects.routes'));
 app.use('/api/deployments', require('./routes/deployments.routes'));
 app.use('/api/settings',    require('./routes/settings.routes'));

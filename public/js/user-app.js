@@ -91,7 +91,7 @@ document.getElementById('userDeployForm').addEventListener('submit', async (even
   } catch (err) { showFormMessage('deployFormMessage', err.message, true); } finally { button.disabled = false; }
 });
 
-document.getElementById('logoutBtn').addEventListener('click', () => { localStorage.removeItem('firebox_user_name'); localStorage.removeItem('firebox_user_email'); window.location.href = '/'; });
+document.getElementById('logoutBtn').addEventListener('click', async () => { await userFetch('/api/user-auth/logout', { method: 'POST' }); localStorage.removeItem('firebox_user_name'); localStorage.removeItem('firebox_user_email'); window.location.href = '/'; });
 setIdentity();
 const initialSection = window.location.hash.slice(1) || 'home';
 showUserSection(initialSection, false);
