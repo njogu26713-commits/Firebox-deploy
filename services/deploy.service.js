@@ -81,6 +81,19 @@ function agentRepositoryRef(project) {
   return [match[1], match[2]];
 }
 
+async function shouldUseAzureAgent(project) {
+  if (!azureAgent.getConfigStatus().configured) return false;
+  if (project.type === 'docker') return true;
+  if (!project.githubToken) return false;
+  try {
+    const [owner, repo] = agentRepositoryRef(project);
+    const inspection = await require('./user-github.service').inspectRepository({ githubToken: project.githubToken }, owner, repo, project.githubBranch || 'main');
+    return inspection.detected?.hasDockerfile === true;
+  } catch {
+    return false;
+  }
+}
+
 async function runAzureAgentPipeline(project, deployment, log) {
   const token = project.githubToken ? cryptoSvc.decrypt(project.githubToken) : '';
   if (!token) throw new Error('The project has no encrypted GitHub token available for Azure Agent deployment.');
@@ -198,7 +211,8 @@ async function runDeployPipeline(project, deployment) {
     // Docker projects use the authenticated HTTPS agent when configured. The
     // existing SSH path remains available for non-Docker projects so current
     // deployments are preserved while the migration is staged safely.
-    if (project.type === 'docker' && azureAgent.getConfigStatus().configured) {
+    const useAzureAgent = await shouldUseAzureAgent(project);
+    if (useAzureAgent) {
       log('info', 'Using authenticated Azure Agent transport; direct Railway-to-VM SSH is not used.');
       await logger.setStatus(deployment, 'building');
       deployment.status = 'building';
@@ -212,6 +226,7 @@ async function runDeployPipeline(project, deployment) {
       return;
     }
 
+    if (azureAgent.getConfigStatus().configured) log('info', `Azure Agent not selected for stored runtime ${project.type || 'unknown'}; using legacy SSH transport.`);
     const creds = await getSshCredentials(project);
     const deployPath = resolveDeployPath(project, creds);
     const githubToken = project.githubToken ? cryptoSvc.decrypt(project.githubToken) : '';
