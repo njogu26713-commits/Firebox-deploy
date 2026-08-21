@@ -96,11 +96,11 @@
                 placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;…&#10;-----END OPENSSH PRIVATE KEY-----"
                 style="font-family:var(--mono);font-size:12px;resize:vertical;"
                 autocomplete="off"></textarea>
-              <div class="field-hint">Paste the full PEM private key. It is stored AES-256 encrypted and never sent to the client.</div>
+              <div class="field-hint">Paste the full PEM private key. It is stored AES-256 encrypted and never sent to the client. After saving, this field stays blank by design; leave it blank to keep the saved key.</div>
             </div>
 
             <div id="passwordField" style="display:none;">
-              <input type="password" id="sshPassword" placeholder="SSH password" autocomplete="new-password" />
+              <input type="password" id="sshPassword" placeholder="Leave blank to keep the saved password" autocomplete="new-password" />
             </div>
           </div>
 

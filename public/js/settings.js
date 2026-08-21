@@ -64,13 +64,7 @@ document.getElementById('saveSshBtn').addEventListener('click', async () => {
 
   if (!host)     { showToast('SSH host is required', 'error'); return; }
   if (!username) { showToast('SSH username is required', 'error'); return; }
-  if (authType === 'key' && !privateKey) {
-    showToast('Paste your private key', 'error'); return;
-  }
-  if (authType === 'password' && !password) {
-    showToast('Enter your SSH password', 'error'); return;
-  }
-
+  // Blank secret fields intentionally preserve the encrypted credential already saved on the server.
   try {
     await apiFetch('/api/settings/ssh-credentials', {
       method: 'POST',
@@ -79,7 +73,7 @@ document.getElementById('saveSshBtn').addEventListener('click', async () => {
     // Clear the sensitive fields after save
     document.getElementById('sshPrivateKey').value = '';
     document.getElementById('sshPassword').value   = '';
-    showToast('SSH connection saved.');
+    showToast(privateKey || password ? 'SSH connection saved securely.' : 'VPS settings saved; existing SSH credentials were preserved.');
     loadSettings();
   } catch (err) {
     showToast(err.message, 'error');

@@ -71,8 +71,6 @@ async function saveSshCredentials(req, res) {
 
   if (!host || !host.trim())     return res.status(400).json({ error: 'SSH host is required' });
   if (!username || !username.trim()) return res.status(400).json({ error: 'SSH username is required' });
-  if (!privateKey && !password)  return res.status(400).json({ error: 'A private key or password is required' });
-
   const user = await getAdminUser(req);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -81,13 +79,16 @@ async function saveSshCredentials(req, res) {
   user.sshUsername   = username.trim();
   user.sshDeployRoot = deployRoot ? deployRoot.trim() : '/opt/apps';
 
-  // Store whichever auth method was provided (key takes precedence)
+  // Store whichever auth method was provided (key takes precedence). If both
+  // are blank and credentials already exist, preserve the encrypted secret.
   if (privateKey && privateKey.trim()) {
     user.sshPrivateKey = crypto.encrypt(privateKey.trim());
     user.sshPassword   = ''; // clear the other method
   } else if (password && password.trim()) {
     user.sshPassword   = crypto.encrypt(password.trim());
     user.sshPrivateKey = '';
+  } else if (!user.sshPrivateKey && !user.sshPassword) {
+    return res.status(400).json({ error: 'A private key or password is required for the first save.' });
   }
 
   await user.save();
