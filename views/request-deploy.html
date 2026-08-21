@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Firebox — Request a Deployment</title>
+<link rel="stylesheet" href="/css/style.css" />
+<script src="/js/theme.js"></script>
+</head>
+<body>
+<div class="public-shell">
+  <header class="public-header">
+    <a class="brand" href="/request-deploy"><div class="brand-mark">🔥</div><div class="brand-name">Firebox<span>Deploy</span></div></a>
+    <div class="public-header-actions"><button class="btn btn-ghost btn-sm" id="themeToggle" type="button">☀ Light mode</button><a class="btn btn-ghost btn-sm" href="/login">Admin sign in</a></div>
+  </header>
+  <main class="public-main">
+    <div class="request-hero"><div class="eyebrow">DEPLOYMENT REQUEST</div><h1>Tell us where to deploy your project.</h1><p>Choose a platform and send the repository details. The admin team will review the request and handle the deployment setup.</p></div>
+    <form class="card request-form" id="requestForm">
+      <div class="request-section"><div class="section-heading"><span class="section-number">01</span><div><h2>Choose a provider</h2><p>Select the platform that fits your project.</p></div></div><div class="request-provider-grid">
+        <button class="request-provider" type="button" data-provider="railway"><strong>Railway</strong><span>Node.js, containers, and managed services.</span></button>
+        <button class="request-provider" type="button" data-provider="vercel"><strong>Vercel</strong><span>Frontends, Next.js, serverless, and edge apps.</span></button>
+        <button class="request-provider" type="button" data-provider="heroku"><strong>Heroku</strong><span>Buildpacks, dynos, add-ons, and pipelines.</span></button>
+        <button class="request-provider" type="button" data-provider="render"><strong>Render</strong><span>Web services, sites, workers, and cron jobs.</span></button>
+      </div></div>
+      <div class="request-section"><div class="section-heading"><span class="section-number">02</span><div><h2>Project details</h2><p>Give the admin team enough information to prepare the deployment.</p></div></div><div class="row"><div class="field"><label for="projectName">Project name</label><input id="projectName" required maxlength="120" placeholder="My web app" /></div><div class="field"><label for="repoUrl">Repository URL</label><input id="repoUrl" type="url" required maxlength="500" placeholder="https://github.com/owner/repository" /></div></div><div class="row"><div class="field"><label for="branch">Branch</label><input id="branch" value="main" maxlength="120" /></div><div class="field"><label for="notes">Notes <span class="field-hint">optional</span></label><input id="notes" maxlength="2000" placeholder="Build command, domain, or runtime notes" /></div></div></div>
+      <div class="request-section"><div class="section-heading"><span class="section-number">03</span><div><h2>Your contact details</h2><p>We use these details to identify and follow up on the request.</p></div></div><div class="row"><div class="field"><label for="requesterName">Name</label><input id="requesterName" required maxlength="120" placeholder="Your name" /></div><div class="field"><label for="requesterEmail">Email</label><input id="requesterEmail" type="email" required maxlength="180" placeholder="you@example.com" /></div></div></div>
+      <div class="request-footer"><p id="requestError" class="form-error" style="display:none;"></p><button class="btn btn-primary" id="submitRequest" type="submit" disabled>Choose a provider first <span>→</span></button></div>
+    </form>
+    <div id="requestSuccess" class="card request-success" style="display:none;"><div class="success-mark">✓</div><h2>Request received.</h2><p>Your deployment request is now with the admin team. Keep your email available for follow-up.</p><a class="btn btn-primary" href="/request-deploy">Submit another request</a></div>
+  </main>
+</div>
+<script src="/js/request-deploy.js"></script>
+</body>
+</html>

@@ -694,3 +694,44 @@ body, .sidebar, .topbar, .card, .btn, input, select, textarea {
 .deploy-note strong { color: var(--text); }
 @media (max-width: 800px) { .provider-grid { grid-template-columns: 1fr; } .provider-step { display: none; } }
 @media (max-width: 560px) { .deploy-intro, .deploy-next { align-items: flex-start; flex-direction: column; } .deploy-intro-mark { display: none; } .deploy-next .btn { width: 100%; justify-content: center; } }
+
+/* ── User deployment requests and admin queue ─────────────────────── */
+.public-shell { min-height: 100vh; background: var(--bg); }
+.public-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 32px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.public-header .brand { padding: 0; }
+.public-header-actions { display: flex; align-items: center; gap: 8px; }
+.public-main { width: min(100% - 32px, 980px); margin: 0 auto; padding: 58px 0 80px; }
+.request-hero { max-width: 680px; margin-bottom: 28px; }
+.request-hero h1 { font-size: clamp(32px, 5vw, 52px); line-height: 1.08; margin: 8px 0 14px; }
+.request-hero p { color: var(--muted); font-size: 16px; max-width: 620px; }
+.request-form { padding: 0; overflow: hidden; }
+.request-section { padding: 28px; border-bottom: 1px solid var(--border); }
+.section-heading { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
+.section-heading h2 { font-size: 18px; }
+.section-heading p { color: var(--muted); margin: 4px 0 0; font-size: 13px; }
+.section-number { color: var(--ember); font: 700 12px var(--font-mono); padding-top: 3px; }
+.request-provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.request-provider { display: flex; flex-direction: column; gap: 6px; min-height: 100px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; transition: border-color .15s, background-color .2s, transform .12s; }
+.request-provider:hover { border-color: var(--muted-2); transform: translateY(-1px); }
+.request-provider.selected { border-color: var(--ember); background: var(--ember-dim); box-shadow: 0 0 0 1px var(--ember); }
+.request-provider strong { font-family: var(--font-display); font-size: 15px; }
+.request-provider span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.request-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 22px 28px; background: var(--surface-2); }
+.request-footer .form-error { margin: 0; }
+.request-success { max-width: 600px; margin: 0 auto; padding: 42px; text-align: center; }
+.success-mark { width: 48px; height: 48px; margin: 0 auto 14px; display: grid; place-items: center; border-radius: 50%; background: var(--teal-dim); color: var(--teal); font-size: 24px; }
+.request-success p { color: var(--muted); margin: 8px 0 22px; }
+.admin-request-list { display: grid; gap: 14px; }
+.admin-request-card { padding: 20px; }
+.admin-request-head, .admin-request-meta, .admin-request-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.request-project-name { font: 600 17px var(--font-display); }
+.request-requester { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.request-requester a, .admin-request-meta a { color: var(--ember); }
+.request-provider-badge { padding: 5px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.admin-request-meta { justify-content: flex-start; flex-wrap: wrap; margin-top: 16px; color: var(--muted); font-size: 12px; }
+.admin-request-meta span:first-child { flex: 1 1 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-request-notes { margin: 15px 0 0; padding: 10px 12px; border-left: 2px solid var(--ember); color: var(--muted); font-size: 13px; }
+.admin-request-actions { justify-content: flex-start; margin-top: 17px; }
+.request-status { width: 140px; }
+.request-admin-notes { flex: 1; min-width: 150px; }
+@media (max-width: 640px) { .public-header { padding: 14px 16px; } .public-header .brand-name { font-size: 14px; } .public-header-actions .btn:first-child { display: none; } .public-main { width: min(100% - 20px, 980px); padding-top: 34px; } .request-provider-grid { grid-template-columns: 1fr; } .request-section { padding: 20px 16px; } .request-footer, .admin-request-actions { align-items: stretch; flex-direction: column; } .request-footer .btn, .request-status, .request-admin-notes { width: 100%; } .admin-request-head { align-items: flex-start; } }
