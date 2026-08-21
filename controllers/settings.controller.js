@@ -1,9 +1,15 @@
 const User   = require('../models/User');
+const config = require('../config/config');
 const crypto = require('../services/crypto.service');
 
+async function getAdminUser(req) {
+  const sessionId = req.session?.userId || req.userId;
+  if (sessionId && /^[a-f\d]{24}$/i.test(String(sessionId))) return User.findById(sessionId);
+  return User.findOne({ $or: [{ email: config.adminEmail.toLowerCase() }, { role: 'owner' }] });
+}
+
 async function getSettings(req, res) {
-  const userId = req.session.userId || req.userId;
-  const user   = await User.findById(userId);
+  const user = await getAdminUser(req);
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json({ settings: user.toSafeJSON() });
 }
@@ -17,8 +23,7 @@ async function saveSshCredentials(req, res) {
   if (!username || !username.trim()) return res.status(400).json({ error: 'SSH username is required' });
   if (!privateKey && !password)  return res.status(400).json({ error: 'A private key or password is required' });
 
-  const userId = req.session.userId || req.userId;
-  const user   = await User.findById(userId);
+  const user = await getAdminUser(req);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   user.sshHost       = host.trim();
@@ -40,8 +45,7 @@ async function saveSshCredentials(req, res) {
 }
 
 async function deleteSshCredentials(req, res) {
-  const userId = req.session.userId || req.userId;
-  const user   = await User.findById(userId);
+  const user = await getAdminUser(req);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   user.sshHost       = '';
@@ -62,8 +66,7 @@ async function saveGithubToken(req, res) {
     return res.status(400).json({ error: 'GitHub personal access token is required' });
   }
 
-  const userId = req.session.userId || req.userId;
-  const user   = await User.findById(userId);
+  const user = await getAdminUser(req);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   user.githubToken = crypto.encrypt(token.trim());
@@ -72,8 +75,7 @@ async function saveGithubToken(req, res) {
 }
 
 async function deleteGithubToken(req, res) {
-  const userId = req.session.userId || req.userId;
-  const user   = await User.findById(userId);
+  const user = await getAdminUser(req);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   user.githubToken = '';
