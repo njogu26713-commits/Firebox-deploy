@@ -152,7 +152,13 @@ async function runDeployPipeline(project, deployment) {
     const githubToken = project.githubToken ? cryptoSvc.decrypt(project.githubToken) : '';
     const gitCommand = githubToken ? `git -c http.extraheader=${shellQuote(`AUTHORIZATION: bearer ${githubToken}`)}` : 'git';
 
-    log('info', `[1/4] Connecting to ${creds.host}:${creds.port} as ${creds.username}…`);
+    log('info', `[1/4] Checking TCP reachability to ${creds.host}:${creds.port}…`);
+    const tcp = await sshSvc.probeTcp({ host: creds.host, port: creds.port, timeout: 10000 });
+    if (!tcp.ok) {
+      throw new Error(`VPS network unreachable at ${creds.host}:${creds.port}: ${tcp.error}. Railway can resolve the configured destination but cannot establish TCP; check Railway outbound networking, its egress allowlist, or use a reachable deployment transport.`);
+    }
+    log('info', `✓ TCP connection established in ${tcp.elapsedMs}ms`);
+    log('info', `Connecting to ${creds.host}:${creds.port} as ${creds.username}…`);
     conn = await sshSvc.connect({
       host:       creds.host,
       port:       creds.port,

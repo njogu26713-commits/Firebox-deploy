@@ -5,6 +5,29 @@
  */
 
 const { Client } = require('ssh2');
+const net = require('net');
+
+/**
+ * Probe raw TCP reachability before attempting SSH authentication.
+ * This never uses or handles credentials.
+ */
+function probeTcp({ host, port = 22, timeout = 10000 }) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    let settled = false;
+    const socket = net.createConnection({ host, port: Number(port), family: 4, autoSelectFamily: false, timeout });
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      const payload = { ...result, host, port: Number(port), elapsedMs: Date.now() - startedAt };
+      socket.destroy();
+      resolve(payload);
+    };
+    socket.once('connect', () => finish({ ok: true, status: 'success' }));
+    socket.once('timeout', () => finish({ ok: false, status: 'timeout', error: `TCP connection timed out after ${timeout}ms` }));
+    socket.once('error', (err) => finish({ ok: false, status: 'failed', error: `${err.code || 'TCP_ERROR'}: ${err.message}` }));
+  });
+}
 
 /**
  * Open an SSH connection.
@@ -110,4 +133,4 @@ function writeFile(conn, remotePath, content) {
   });
 }
 
-module.exports = { connect, exec, writeFile };
+module.exports = { connect, probeTcp, exec, writeFile };
