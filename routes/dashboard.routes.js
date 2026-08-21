@@ -15,6 +15,7 @@ router.get('/login',         (req, res) => {
 
 router.get('/dashboard',         requirePageAuth, (req, res) => res.sendFile(views('dashboard.html')));
 router.get('/projects/new',      requirePageAuth, (req, res) => res.sendFile(views('new-project.html')));
+router.get('/deploy',            requirePageAuth, (req, res) => res.sendFile(views('deploy.html')));
 router.get('/projects/:id',      requirePageAuth, (req, res) => res.sendFile(views('project-detail.html')));
 router.get('/settings',          requirePageAuth, (req, res) => res.sendFile(views('settings.html')));
 router.get('/azure',             requirePageAuth, (req, res) => res.sendFile(views('azure.html')));
